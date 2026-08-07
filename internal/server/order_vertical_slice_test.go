@@ -55,6 +55,7 @@ func TestOrderVerticalSlicePersistsAcrossSQLiteRestart(t *testing.T) {
 	assertCount(t, reopened, `SELECT COUNT(*) FROM payments WHERE order_id=? AND status='captured'`, orderID, 1)
 	assertCount(t, reopened, `SELECT COUNT(*) FROM receipts WHERE order_id=?`, orderID, 1)
 	assertCount(t, reopened, `SELECT COUNT(*) FROM inventory_movements WHERE reference_type='sale_order' AND reference_id=?`, orderID, 1)
+	assertCount(t, reopened, `SELECT COUNT(*) FROM outbox_events WHERE ordering_key='sales_order:'||? AND event_type='payment.recorded' AND status='pending'`, orderID, 1)
 	assertCount(t, reopened, `SELECT COUNT(*) FROM outbox_events WHERE aggregate_type='sales_order' AND aggregate_id=? AND event_type='sale.completed' AND status='pending'`, orderID, 1)
 
 	var onHand int64
@@ -69,7 +70,7 @@ func TestOrderVerticalSlicePersistsAcrossSQLiteRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect observability: %v", err)
 	}
-	if !snap.DatabaseOK || snap.Outbox.Pending != 1 {
+	if !snap.DatabaseOK || snap.Outbox.Pending != 2 {
 		t.Fatalf("unexpected observability snapshot: %#v", snap)
 	}
 }
@@ -139,7 +140,6 @@ func postOrder(t *testing.T, app *Server) string {
 }
 
 func postPayment(t *testing.T, app *Server, orderID, clientPaymentID string) {
-	t.Helper()
 	body := map[string]any{"client_payment_id": clientPaymentID, "mode": "cash", "amount_minor": 12500, "currency": "INR", "status": "captured"}
 	res := serveJSON(t, app, http.MethodPost, "/api/v1/orders/"+orderID+"/payments", body)
 	if res.Code != http.StatusCreated {
@@ -148,7 +148,6 @@ func postPayment(t *testing.T, app *Server, orderID, clientPaymentID string) {
 }
 
 func completeOrder(t *testing.T, app *Server, orderID string) {
-	t.Helper()
 	res := serveJSON(t, app, http.MethodPost, "/api/v1/orders/"+orderID+"/complete", nil)
 	if res.Code != http.StatusOK {
 		t.Fatalf("complete order status=%d body=%s", res.Code, res.Body.String())

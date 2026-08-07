@@ -58,9 +58,15 @@ type Summary struct {
     OrderStatus  string `json:"order_status"`
 }
 
-type Service struct { db *database.DB }
+type RecordedHook func(context.Context, *sql.Tx, Payment, Summary) error
 
-func New(db *database.DB) *Service { return &Service{db: db} }
+type Service struct {
+    db           *database.DB
+    recordedHook RecordedHook
+}
+
+func New(db *database.DB) *Service { return &Service{db: db, recordedHook: appendRecordedEventTx} }
+func (s *Service) SetRecordedHook(hook RecordedHook) { s.recordedHook = hook }
 
 func (s *Service) Create(ctx context.Context, orderID string, input CreateInput) (Payment, Summary, error) {
     input.ClientPaymentID = strings.TrimSpace(input.ClientPaymentID)
@@ -104,9 +110,7 @@ func (s *Service) Create(ctx context.Context, orderID string, input CreateInput)
         id, err := newID("pay")
         if err != nil { return err }
         var providerPayload any
-        if len(input.ProviderPayload) > 0 {
-            providerPayload = string(input.ProviderPayload)
-        }
+        if len(input.ProviderPayload) > 0 { providerPayload = string(input.ProviderPayload) }
         _, err = tx.ExecContext(ctx, `INSERT INTO payments(id,order_id,client_payment_id,mode,direction,amount_minor,currency,status,reference,provider,provider_payload_json,recorded_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
             id, orderID, input.ClientPaymentID, input.Mode, input.Direction, input.AmountMinor, input.Currency, input.Status, input.Reference, input.Provider, providerPayload, input.RecordedBy, now, now)
         if err != nil { return fmt.Errorf("insert payment: %w", err) }
@@ -115,7 +119,9 @@ func (s *Service) Create(ctx context.Context, orderID string, input CreateInput)
         snapshot, _ := json.Marshal(created)
         if _, err := tx.ExecContext(ctx, `INSERT INTO payment_snapshots(payment_id,version,snapshot_json,created_at) VALUES(?,?,?,?)`, id, 1, string(snapshot), now); err != nil { return err }
         summary, err = recalcOrderPaymentState(ctx, tx, orderID, totalMinor)
-        return err
+        if err != nil { return err }
+        if s.recordedHook != nil { return s.recordedHook(ctx, tx, created, summary) }
+        return nil
     })
     return created, summary, err
 }
@@ -130,9 +136,7 @@ func (s *Service) ListForOrder(ctx context.Context, orderID string) ([]Payment, 
     if err != nil { return nil, Summary{}, err }
     defer rows.Close()
     items := []Payment{}
-    for rows.Next() {
-        p, err := scanPayment(rows); if err != nil { return nil, Summary{}, err }; items = append(items,p)
-    }
+    for rows.Next() { p, err := scanPayment(rows); if err != nil { return nil, Summary{}, err }; items = append(items,p) }
     if err := rows.Err(); err != nil { return nil, Summary{}, err }
     summary, err := s.summary(ctx, orderID, totalMinor)
     return items, summary, err
