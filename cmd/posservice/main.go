@@ -9,10 +9,12 @@ import (
     "time"
 
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/catalog"
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/changefeed"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/config"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/customer"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/device"
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/inbox"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/inventory"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/orders"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/outbox"
@@ -51,7 +53,12 @@ func main() {
     eventOutbox := outbox.New(db)
     syncEngine, err := syncengine.New(eventOutbox, cfg.CentralAPIURL, identity.DeviceID, cfg.SyncRequestTimeout, cfg.SyncPollInterval)
     if err != nil { slog.Error("configure sync engine", "error", err); os.Exit(1) }
-    if syncEngine == nil {
+
+    inboxService := inbox.New(db)
+    var changePuller *changefeed.Puller
+    if cfg.CentralAPIURL != "" {
+        changePuller = changefeed.New(db, inboxService, cfg.CentralAPIURL, identity.DeviceID, cfg.SyncRequestTimeout, cfg.SyncPollInterval)
+    } else {
         slog.Info("central sync disabled", "reason", "POS_CENTRAL_API_URL is not configured")
     }
 
@@ -59,6 +66,7 @@ func main() {
     defer stop()
 
     if syncEngine != nil { go syncEngine.Run(ctx) }
+    if changePuller != nil { go changePuller.Run(ctx) }
     go func() {
         slog.Info("starting POS service", "address", cfg.ListenAddress, "database", cfg.DatabasePath)
         if err := app.Start(); err != nil { slog.Error("POS service stopped unexpectedly", "error", err); stop() }
