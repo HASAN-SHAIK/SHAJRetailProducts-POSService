@@ -108,7 +108,7 @@ func (s *Service) ApplyCompletionTx(ctx context.Context, tx *sql.Tx, order order
         INSERT INTO receipts(
             id,order_id,receipt_number,document_type,store_id,terminal_id,customer_id,
             currency,total_minor,paid_minor,balance_minor,snapshot_json,snapshot_sha256,issued_at,created_at
-        ) VALUES(?,?,?,'receipt',?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ) VALUES(?,?,?,'receipt',?,?,?,?,?,?,?,?,?,?,?)`,
         newID("rcp"), order.ID, receiptNumber, order.StoreID, order.TerminalID, order.CustomerID,
         order.Currency, order.TotalMinor, paid, balance, string(raw), hex.EncodeToString(digest[:]), now, now,
     )

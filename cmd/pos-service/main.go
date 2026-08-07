@@ -13,8 +13,12 @@ import (
 )
 
 func main() {
-    cfg := config.Load()
     logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+    cfg, err := config.Load()
+    if err != nil {
+        logger.Error("invalid configuration", "error", err)
+        os.Exit(1)
+    }
 
     service := app.New(cfg, logger)
 
