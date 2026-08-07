@@ -3,8 +3,10 @@ package database
 import (
     "context"
     "crypto/sha256"
+    "database/sql"
     "embed"
     "encoding/hex"
+    "errors"
     "fmt"
     "io/fs"
     "path/filepath"
@@ -25,6 +27,15 @@ type migration struct {
 }
 
 func (d *DB) Migrate(ctx context.Context) error {
+    if _, err := d.sql.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        checksum TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+    )`); err != nil {
+        return fmt.Errorf("bootstrap schema migrations table: %w", err)
+    }
+
     migrations, err := loadMigrations()
     if err != nil {
         return err
@@ -39,19 +50,21 @@ func (d *DB) Migrate(ctx context.Context) error {
             }
             continue
         }
-        if !isNoRows(err) && m.Version != 1 {
+        if !errors.Is(err, sql.ErrNoRows) {
             return fmt.Errorf("read migration %d: %w", m.Version, err)
         }
 
-        if err := d.WithTx(ctx, func(tx Tx) error {
+        if err := d.WithTx(ctx, func(tx *sql.Tx) error {
             if _, err := tx.ExecContext(ctx, m.SQL); err != nil {
                 return fmt.Errorf("apply migration %d: %w", m.Version, err)
             }
-            _, err := tx.ExecContext(ctx,
-                `INSERT OR REPLACE INTO schema_migrations(version,name,checksum,applied_at) VALUES(?,?,?,?)`,
+            if _, err := tx.ExecContext(ctx,
+                `INSERT INTO schema_migrations(version,name,checksum,applied_at) VALUES(?,?,?,?)`,
                 m.Version, m.Name, m.Checksum, time.Now().UTC().Format(time.RFC3339Nano),
-            )
-            return err
+            ); err != nil {
+                return fmt.Errorf("record migration %d: %w", m.Version, err)
+            }
+            return nil
         }); err != nil {
             return err
         }
@@ -79,7 +92,7 @@ func loadMigrations() ([]migration, error) {
         }
         raw, err := migrationFiles.ReadFile("migrations/" + entry.Name())
         if err != nil {
-            return nil, err
+            return nil, fmt.Errorf("read migration %q: %w", entry.Name(), err)
         }
         sum := sha256.Sum256(raw)
         out = append(out, migration{Version: version, Name: entry.Name(), SQL: string(raw), Checksum: hex.EncodeToString(sum[:])})
