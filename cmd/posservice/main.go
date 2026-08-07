@@ -20,6 +20,7 @@ import (
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/outbox"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/payments"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/receipts"
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/security"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/server"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/syncengine"
 )
@@ -42,13 +43,16 @@ func main() {
     if err != nil { slog.Error("initialize device identity", "error", err); os.Exit(1) }
     slog.Info("local device identity ready", "device_id", identity.DeviceID, "status", identity.Status)
 
+    localAuth, err := security.LoadOrCreate(identity.DeviceID, cfg.LocalAPIToken, cfg.LocalTokenFile, cfg.AllowedOrigins)
+    if err != nil { slog.Error("initialize local API security", "error", err); os.Exit(1) }
+
     catalogRepository := catalog.NewRepository(db)
     customerRepository := customer.NewRepository(db)
     orderService := orders.New(db, catalogRepository)
     paymentService := payments.New(db)
     inventoryService := inventory.New(db)
     receiptService := receipts.New(db)
-    app := server.New(cfg, db, deviceService, catalogRepository, customerRepository, orderService, paymentService, inventoryService, receiptService)
+    app := server.New(cfg, db, deviceService, catalogRepository, customerRepository, orderService, paymentService, inventoryService, receiptService, localAuth)
 
     eventOutbox := outbox.New(db)
     syncEngine, err := syncengine.New(eventOutbox, cfg.CentralAPIURL, identity.DeviceID, cfg.SyncRequestTimeout, cfg.SyncPollInterval)
