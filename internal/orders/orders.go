@@ -1,0 +1,244 @@
+package orders
+
+import (
+    "context"
+    "database/sql"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "strings"
+    "time"
+
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/catalog"
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
+)
+
+var (
+    ErrNotFound        = errors.New("order not found")
+    ErrInvalidOrder    = errors.New("invalid order")
+    ErrAlreadyComplete = errors.New("order already completed")
+)
+
+type Service struct {
+    db      *database.DB
+    catalog *catalog.Repository
+}
+
+func New(db *database.DB, catalogRepository *catalog.Repository) *Service {
+    return &Service{db: db, catalog: catalogRepository}
+}
+
+type CreateInput struct {
+    ClientOrderID string      `json:"client_order_id"`
+    StoreID       string      `json:"store_id"`
+    TerminalID    *string     `json:"terminal_id,omitempty"`
+    CustomerID    *string     `json:"customer_id,omitempty"`
+    Currency      string      `json:"currency"`
+    Notes         *string     `json:"notes,omitempty"`
+    Items         []ItemInput `json:"items"`
+}
+
+type ItemInput struct {
+    ProductID      string  `json:"product_id"`
+    Barcode        *string `json:"barcode,omitempty"`
+    QuantityMilli  int64   `json:"quantity_milli"`
+    UnitPriceMinor *int64  `json:"unit_price_minor,omitempty"`
+    DiscountMinor  int64   `json:"discount_minor"`
+    TaxMinor       int64   `json:"tax_minor"`
+}
+
+type Order struct {
+    ID            string `json:"id"`
+    ClientOrderID string `json:"client_order_id"`
+    StoreID       string `json:"store_id"`
+    TerminalID    *string `json:"terminal_id,omitempty"`
+    CustomerID    *string `json:"customer_id,omitempty"`
+    Status        string `json:"status"`
+    Currency      string `json:"currency"`
+    SubtotalMinor int64 `json:"subtotal_minor"`
+    DiscountMinor int64 `json:"discount_minor"`
+    TaxMinor      int64 `json:"tax_minor"`
+    TotalMinor    int64 `json:"total_minor"`
+    Notes         *string `json:"notes,omitempty"`
+    Version       int `json:"version"`
+    CompletedAt   *string `json:"completed_at,omitempty"`
+    CreatedAt     string `json:"created_at"`
+    UpdatedAt     string `json:"updated_at"`
+    Items         []Item `json:"items"`
+}
+
+type Item struct {
+    ID              string  `json:"id"`
+    LineNo          int     `json:"line_no"`
+    ProductID       string  `json:"product_id"`
+    SKU             *string `json:"sku,omitempty"`
+    ProductName     string  `json:"product_name"`
+    Barcode         *string `json:"barcode,omitempty"`
+    QuantityMilli   int64   `json:"quantity_milli"`
+    UnitPriceMinor  int64   `json:"unit_price_minor"`
+    DiscountMinor   int64   `json:"discount_minor"`
+    TaxMinor        int64   `json:"tax_minor"`
+    LineTotalMinor  int64   `json:"line_total_minor"`
+    TaxCode         *string `json:"tax_code,omitempty"`
+}
+
+func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) {
+    input.ClientOrderID = strings.TrimSpace(input.ClientOrderID)
+    input.StoreID = strings.TrimSpace(input.StoreID)
+    if input.ClientOrderID == "" || input.StoreID == "" || len(input.Items) == 0 {
+        return Order{}, ErrInvalidOrder
+    }
+    if input.Currency == "" { input.Currency = "INR" }
+
+    if existing, err := s.GetByClientID(ctx, input.ClientOrderID); err == nil {
+        return existing, nil
+    } else if !errors.Is(err, ErrNotFound) {
+        return Order{}, err
+    }
+
+    orderID := newID("ord")
+    now := time.Now().UTC().Format(time.RFC3339Nano)
+    var built []Item
+    var subtotal, discount, tax, total int64
+
+    for i, in := range input.Items {
+        if strings.TrimSpace(in.ProductID) == "" || in.QuantityMilli <= 0 || in.DiscountMinor < 0 || in.TaxMinor < 0 {
+            return Order{}, ErrInvalidOrder
+        }
+        product, err := s.catalog.GetProduct(ctx, in.ProductID, input.StoreID)
+        if err != nil { return Order{}, fmt.Errorf("load product %s: %w", in.ProductID, err) }
+        price := int64(0)
+        if in.UnitPriceMinor != nil {
+            if *in.UnitPriceMinor < 0 || (!product.AllowManualPrice && product.Price != nil && *in.UnitPriceMinor != product.Price.AmountMinor) {
+                return Order{}, ErrInvalidOrder
+            }
+            price = *in.UnitPriceMinor
+        } else if product.Price != nil {
+            price = product.Price.AmountMinor
+        } else {
+            return Order{}, fmt.Errorf("product %s has no price", in.ProductID)
+        }
+        gross := price * in.QuantityMilli / 1000
+        lineTotal := gross - in.DiscountMinor + in.TaxMinor
+        if lineTotal < 0 { return Order{}, ErrInvalidOrder }
+        barcode := in.Barcode
+        if barcode == nil && len(product.Barcodes) > 0 { barcode = &product.Barcodes[0] }
+        built = append(built, Item{
+            ID: newID("itm"), LineNo: i + 1, ProductID: product.ID, SKU: product.SKU, ProductName: product.Name,
+            Barcode: barcode, QuantityMilli: in.QuantityMilli, UnitPriceMinor: price, DiscountMinor: in.DiscountMinor,
+            TaxMinor: in.TaxMinor, LineTotalMinor: lineTotal, TaxCode: product.TaxCode,
+        })
+        subtotal += gross
+        discount += in.DiscountMinor
+        tax += in.TaxMinor
+        total += lineTotal
+    }
+
+    order := Order{
+        ID: orderID, ClientOrderID: input.ClientOrderID, StoreID: input.StoreID, TerminalID: input.TerminalID,
+        CustomerID: input.CustomerID, Status: "confirmed", Currency: input.Currency, SubtotalMinor: subtotal,
+        DiscountMinor: discount, TaxMinor: tax, TotalMinor: total, Notes: input.Notes, Version: 1,
+        CreatedAt: now, UpdatedAt: now, Items: built,
+    }
+
+    err := s.db.WithTx(ctx, func(tx *sql.Tx) error {
+        if _, err := tx.ExecContext(ctx, `
+            INSERT INTO sales_orders(id,client_order_id,store_id,terminal_id,customer_id,status,currency,subtotal_minor,discount_minor,tax_minor,total_minor,notes,source,version,created_at,updated_at)
+            VALUES(?,?,?,?,?,'confirmed',?,?,?,?,?,?,'pos',1,?,?)`,
+            order.ID, order.ClientOrderID, order.StoreID, order.TerminalID, order.CustomerID, order.Currency,
+            order.SubtotalMinor, order.DiscountMinor, order.TaxMinor, order.TotalMinor, order.Notes, now, now,
+        ); err != nil { return err }
+
+        for _, item := range order.Items {
+            if _, err := tx.ExecContext(ctx, `
+                INSERT INTO sales_order_items(id,order_id,line_no,product_id,sku,product_name,barcode,quantity_milli,unit_price_minor,discount_minor,tax_minor,line_total_minor,tax_code,created_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                item.ID, order.ID, item.LineNo, item.ProductID, item.SKU, item.ProductName, item.Barcode,
+                item.QuantityMilli, item.UnitPriceMinor, item.DiscountMinor, item.TaxMinor, item.LineTotalMinor, item.TaxCode, now,
+            ); err != nil { return err }
+        }
+        return s.saveSnapshot(ctx, tx, order)
+    })
+    if err != nil { return Order{}, fmt.Errorf("create order: %w", err) }
+    return order, nil
+}
+
+func (s *Service) Get(ctx context.Context, id string) (Order, error) {
+    return s.getOne(ctx, `WHERE id = ?`, id)
+}
+
+func (s *Service) GetByClientID(ctx context.Context, clientID string) (Order, error) {
+    return s.getOne(ctx, `WHERE client_order_id = ?`, clientID)
+}
+
+func (s *Service) Complete(ctx context.Context, id string) (Order, error) {
+    order, err := s.Get(ctx, id)
+    if err != nil { return Order{}, err }
+    if order.CompletedAt != nil || order.Status == "paid" || order.Status == "cancelled" || order.Status == "returned" {
+        return Order{}, ErrAlreadyComplete
+    }
+    now := time.Now().UTC().Format(time.RFC3339Nano)
+    order.CompletedAt = &now
+    order.UpdatedAt = now
+    order.Version++
+    if order.Status == "draft" { order.Status = "confirmed" }
+    if err := s.db.WithTx(ctx, func(tx *sql.Tx) error {
+        if _, err := tx.ExecContext(ctx, `UPDATE sales_orders SET completed_at=?, updated_at=?, version=? WHERE id=?`, now, now, order.Version, id); err != nil { return err }
+        return s.saveSnapshot(ctx, tx, order)
+    }); err != nil { return Order{}, err }
+    return order, nil
+}
+
+func (s *Service) List(ctx context.Context, storeID, status string, limit int) ([]Order, error) {
+    if limit <= 0 || limit > 200 { limit = 50 }
+    q := `SELECT id FROM sales_orders WHERE store_id = ?`
+    args := []any{storeID}
+    if status != "" { q += ` AND status = ?`; args = append(args, status) }
+    q += ` ORDER BY created_at DESC LIMIT ?`; args = append(args, limit)
+    rows, err := s.db.SQL().QueryContext(ctx, q, args...)
+    if err != nil { return nil, err }
+    defer rows.Close()
+    var out []Order
+    for rows.Next() {
+        var id string
+        if err := rows.Scan(&id); err != nil { return nil, err }
+        order, err := s.Get(ctx, id)
+        if err != nil { return nil, err }
+        out = append(out, order)
+    }
+    return out, rows.Err()
+}
+
+func (s *Service) getOne(ctx context.Context, where string, value any) (Order, error) {
+    row := s.db.SQL().QueryRowContext(ctx, `
+        SELECT id,client_order_id,store_id,terminal_id,customer_id,status,currency,subtotal_minor,discount_minor,tax_minor,total_minor,notes,version,completed_at,created_at,updated_at
+        FROM sales_orders `+where, value)
+    var o Order
+    if err := row.Scan(&o.ID,&o.ClientOrderID,&o.StoreID,&o.TerminalID,&o.CustomerID,&o.Status,&o.Currency,&o.SubtotalMinor,&o.DiscountMinor,&o.TaxMinor,&o.TotalMinor,&o.Notes,&o.Version,&o.CompletedAt,&o.CreatedAt,&o.UpdatedAt); err != nil {
+        if errors.Is(err, sql.ErrNoRows) { return Order{}, ErrNotFound }
+        return Order{}, err
+    }
+    rows, err := s.db.SQL().QueryContext(ctx, `
+        SELECT id,line_no,product_id,sku,product_name,barcode,quantity_milli,unit_price_minor,discount_minor,tax_minor,line_total_minor,tax_code
+        FROM sales_order_items WHERE order_id=? ORDER BY line_no`, o.ID)
+    if err != nil { return Order{}, err }
+    defer rows.Close()
+    for rows.Next() {
+        var i Item
+        if err := rows.Scan(&i.ID,&i.LineNo,&i.ProductID,&i.SKU,&i.ProductName,&i.Barcode,&i.QuantityMilli,&i.UnitPriceMinor,&i.DiscountMinor,&i.TaxMinor,&i.LineTotalMinor,&i.TaxCode); err != nil { return Order{}, err }
+        o.Items = append(o.Items, i)
+    }
+    return o, rows.Err()
+}
+
+func (s *Service) saveSnapshot(ctx context.Context, tx *sql.Tx, order Order) error {
+    raw, err := json.Marshal(order)
+    if err != nil { return err }
+    _, err = tx.ExecContext(ctx, `INSERT INTO sales_order_snapshots(order_id,version,snapshot_json,created_at) VALUES(?,?,?,?)`,
+        order.ID, order.Version, string(raw), time.Now().UTC().Format(time.RFC3339Nano))
+    return err
+}
+
+func newID(prefix string) string {
+    return fmt.Sprintf("%s_%d", prefix, time.Now().UTC().UnixNano())
+}
