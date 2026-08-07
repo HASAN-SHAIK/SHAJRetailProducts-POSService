@@ -13,6 +13,7 @@ import (
 
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/orders"
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/outbox"
 )
 
 var ErrNotFound = errors.New("receipt not found")
@@ -66,7 +67,8 @@ type Receipt struct {
 }
 
 // ApplyCompletionTx creates exactly one immutable receipt inside the same
-// transaction as inventory issuance and order completion.
+// transaction as inventory issuance and order completion. The canonical
+// sale.completed outbox event is appended before this transaction can commit.
 func (s *Service) ApplyCompletionTx(ctx context.Context, tx *sql.Tx, order orders.Order) error {
     var existing string
     err := tx.QueryRowContext(ctx, `SELECT id FROM receipts WHERE order_id=?`, order.ID).Scan(&existing)
@@ -110,7 +112,13 @@ func (s *Service) ApplyCompletionTx(ctx context.Context, tx *sql.Tx, order order
         newID("rcp"), order.ID, receiptNumber, order.StoreID, order.TerminalID, order.CustomerID,
         order.Currency, order.TotalMinor, paid, balance, string(raw), hex.EncodeToString(digest[:]), now, now,
     )
-    return err
+    if err != nil {
+        return err
+    }
+
+    // No network call occurs here. This only writes the durable integration
+    // event into SQLite using the same transaction as the completed sale.
+    return outbox.New(nil).ApplySaleCompletedTx(ctx, tx, order)
 }
 
 func (s *Service) GetByOrder(ctx context.Context, orderID string) (Receipt, error) {
