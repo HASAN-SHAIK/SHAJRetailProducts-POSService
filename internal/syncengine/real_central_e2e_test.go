@@ -125,7 +125,7 @@ func TestRealCentralOrderE2E(t *testing.T) {
 	// Replay the exact same durable event. Central must answer idempotently and
 	// the POS must still mark the event published without creating duplicates.
 	_, err = db.SQL().Exec(`UPDATE outbox_events
-		SET status='pending', published_at=NULL, locked_at=NULL, locked_by=NULL,
+		SET status='pending', published_at=NULL, locked_at=NULL,
 			last_error=NULL, available_at=?
 		WHERE id=?`, time.Now().UTC().Format(time.RFC3339Nano), eventID)
 	if err != nil {
