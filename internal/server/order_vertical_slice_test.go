@@ -57,6 +57,7 @@ func TestOrderVerticalSlicePersistsAcrossSQLiteRestart(t *testing.T) {
 	assertCount(t, reopened, `SELECT COUNT(*) FROM inventory_movements WHERE reference_type='sale_order' AND reference_id=?`, orderID, 1)
 	assertCount(t, reopened, `SELECT COUNT(*) FROM outbox_events WHERE ordering_key='sales_order:'||? AND event_type='payment.recorded' AND status='pending'`, orderID, 1)
 	assertCount(t, reopened, `SELECT COUNT(*) FROM outbox_events WHERE ordering_key='sales_order:'||? AND event_type='inventory.movement.recorded' AND status='pending'`, orderID, 1)
+	assertCount(t, reopened, `SELECT COUNT(*) FROM outbox_events WHERE ordering_key='sales_order:'||? AND event_type='receipt.issued' AND status='pending'`, orderID, 1)
 	assertCount(t, reopened, `SELECT COUNT(*) FROM outbox_events WHERE aggregate_type='sales_order' AND aggregate_id=? AND event_type='sale.completed' AND status='pending'`, orderID, 1)
 
 	var onHand int64
@@ -71,7 +72,7 @@ func TestOrderVerticalSlicePersistsAcrossSQLiteRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect observability: %v", err)
 	}
-	if !snap.DatabaseOK || snap.Outbox.Pending != 3 {
+	if !snap.DatabaseOK || snap.Outbox.Pending != 4 {
 		t.Fatalf("unexpected observability snapshot: %#v", snap)
 	}
 }
@@ -173,7 +174,7 @@ func serveJSON(t *testing.T, app *Server, method, target string, payload any) *h
 }
 
 func assertCount(t *testing.T, db *database.DB, query string, arg any, want int) {
-	 t.Helper()
+	t.Helper()
 	var got int
 	if err := db.SQL().QueryRow(query, arg).Scan(&got); err != nil {
 		t.Fatal(err)
