@@ -29,8 +29,10 @@ func NewSecure(
     localAuth *security.LocalAuth,
 ) *Server {
     s := New(cfg, db, deviceService, catalogRepository, customerRepository, orderService, paymentService, inventoryService, receiptService)
+    handler := s.httpServer.Handler
     if localAuth != nil {
-        s.httpServer.Handler = localAuth.Middleware(s.httpServer.Handler)
+        handler = localAuth.Middleware(handler)
     }
+    s.httpServer.Handler = requestMetricsMiddleware(handler)
     return s
 }
