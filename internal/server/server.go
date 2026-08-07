@@ -8,16 +8,18 @@ import (
     "time"
 
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/config"
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
 )
 
 type Server struct {
     httpServer *http.Server
     startedAt  time.Time
     cfg        config.Config
+    db         *database.DB
 }
 
-func New(cfg config.Config) *Server {
-    s := &Server{cfg: cfg, startedAt: time.Now().UTC()}
+func New(cfg config.Config, db *database.DB) *Server {
+    s := &Server{cfg: cfg, db: db, startedAt: time.Now().UTC()}
 
     mux := http.NewServeMux()
     mux.HandleFunc("GET /api/v1/health", s.handleHealth)
@@ -57,7 +59,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
     })
 }
 
-func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+    ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+    defer cancel()
+    if err := s.db.Ping(ctx); err != nil {
+        writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not_ready", "reason": "database_unavailable"})
+        return
+    }
     writeJSON(w, http.StatusOK, map[string]any{"status": "ready"})
 }
 
