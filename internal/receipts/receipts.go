@@ -67,8 +67,8 @@ type Receipt struct {
 }
 
 // ApplyCompletionTx creates exactly one immutable receipt inside the same
-// transaction as inventory issuance and order completion. The canonical
-// sale.completed outbox event is appended before this transaction can commit.
+// transaction as inventory issuance and order completion. The receipt.issued
+// and canonical sale.completed events are both durable before commit.
 func (s *Service) ApplyCompletionTx(ctx context.Context, tx *sql.Tx, order orders.Order) error {
     var existing string
     err := tx.QueryRowContext(ctx, `SELECT id FROM receipts WHERE order_id=?`, order.ID).Scan(&existing)
@@ -94,6 +94,7 @@ func (s *Service) ApplyCompletionTx(ctx context.Context, tx *sql.Tx, order order
         return fmt.Errorf("marshal receipt snapshot: %w", err)
     }
     digest := sha256.Sum256(raw)
+    digestHex := hex.EncodeToString(digest[:])
     now := time.Now().UTC().Format(time.RFC3339Nano)
     receiptNumber, err := nextReceiptNumberTx(ctx, tx, order.StoreID, order.TerminalID, now)
     if err != nil {
@@ -104,20 +105,30 @@ func (s *Service) ApplyCompletionTx(ctx context.Context, tx *sql.Tx, order order
         balance = 0
     }
 
+    receipt := Receipt{
+        ID: newID("rcp"), OrderID: order.ID, ReceiptNumber: receiptNumber, DocumentType: "receipt",
+        StoreID: order.StoreID, TerminalID: order.TerminalID, CustomerID: order.CustomerID,
+        Currency: order.Currency, TotalMinor: order.TotalMinor, PaidMinor: paid, BalanceMinor: balance,
+        Snapshot: snapshot, SnapshotSHA256: digestHex, IssuedAt: now,
+    }
+
     _, err = tx.ExecContext(ctx, `
         INSERT INTO receipts(
             id,order_id,receipt_number,document_type,store_id,terminal_id,customer_id,
             currency,total_minor,paid_minor,balance_minor,snapshot_json,snapshot_sha256,issued_at,created_at
-        ) VALUES(?,?,?,'receipt',?,?,?,?,?,?,?,?,?,?,?)`,
-        newID("rcp"), order.ID, receiptNumber, order.StoreID, order.TerminalID, order.CustomerID,
-        order.Currency, order.TotalMinor, paid, balance, string(raw), hex.EncodeToString(digest[:]), now, now,
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        receipt.ID, receipt.OrderID, receipt.ReceiptNumber, receipt.DocumentType, receipt.StoreID, receipt.TerminalID, receipt.CustomerID,
+        receipt.Currency, receipt.TotalMinor, receipt.PaidMinor, receipt.BalanceMinor, string(raw), receipt.SnapshotSHA256, receipt.IssuedAt, now,
     )
     if err != nil {
         return err
     }
+    if err := applyReceiptIssuedTx(ctx, tx, receipt); err != nil {
+        return err
+    }
 
-    // No network call occurs here. This only writes the durable integration
-    // event into SQLite using the same transaction as the completed sale.
+    // No network call occurs here. Both durable integration events are written
+    // inside the same transaction as the immutable receipt and completed sale.
     return outbox.New(nil).ApplySaleCompletedTx(ctx, tx, order)
 }
 
