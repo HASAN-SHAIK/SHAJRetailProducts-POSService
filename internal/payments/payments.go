@@ -94,7 +94,10 @@ func (s *Service) Create(ctx context.Context, orderID string, input CreateInput)
         if err == nil {
             if existing.OrderID != orderID { return ErrInvalidPayment }
             created = existing
-            summary, err = recalcOrderPaymentState(ctx, tx, orderID, totalMinor)
+            // A retry of an already-created client payment must be observationally
+            // idempotent. Recomputing through recalcOrderPaymentState would bump
+            // the order version even though no new business fact was recorded.
+            summary, err = paymentSummaryTx(ctx, tx, orderID, totalMinor)
             return err
         }
         if !errors.Is(err, ErrNotFound) { return err }
@@ -143,8 +146,21 @@ func (s *Service) summary(ctx context.Context, orderID string, totalMinor int64)
     if err := s.db.SQL().QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN status='captured' AND direction='in' THEN amount_minor WHEN status IN ('captured','refunded') AND direction='out' THEN -amount_minor ELSE 0 END),0) FROM payments WHERE order_id=?`, orderID).Scan(&paid); err != nil { return Summary{},err }
     var status string
     if err := s.db.SQL().QueryRowContext(ctx, `SELECT status FROM sales_orders WHERE id=?`, orderID).Scan(&status); err != nil { return Summary{},err }
-    balance := totalMinor-paid; if balance < 0 { balance = 0 }
-    return Summary{OrderID:orderID,TotalMinor:totalMinor,PaidMinor:paid,BalanceMinor:balance,OrderStatus:status},nil
+    return buildSummary(orderID, totalMinor, paid, status),nil
+}
+
+func paymentSummaryTx(ctx context.Context, tx *sql.Tx, orderID string, totalMinor int64) (Summary,error) {
+    var paid int64
+    if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN status='captured' AND direction='in' THEN amount_minor WHEN status IN ('captured','refunded') AND direction='out' THEN -amount_minor ELSE 0 END),0) FROM payments WHERE order_id=?`, orderID).Scan(&paid); err != nil { return Summary{},err }
+    var status string
+    if err := tx.QueryRowContext(ctx, `SELECT status FROM sales_orders WHERE id=?`, orderID).Scan(&status); err != nil { return Summary{},err }
+    return buildSummary(orderID, totalMinor, paid, status),nil
+}
+
+func buildSummary(orderID string, totalMinor, paid int64, status string) Summary {
+    balance := totalMinor-paid
+    if balance < 0 { balance = 0 }
+    return Summary{OrderID:orderID,TotalMinor:totalMinor,PaidMinor:paid,BalanceMinor:balance,OrderStatus:status}
 }
 
 func recalcOrderPaymentState(ctx context.Context, tx *sql.Tx, orderID string, totalMinor int64) (Summary,error) {
@@ -154,8 +170,7 @@ func recalcOrderPaymentState(ctx context.Context, tx *sql.Tx, orderID string, to
     if paid <= 0 { status = "confirmed" } else if paid < totalMinor { status = "partially_paid" } else { status = "paid" }
     now := time.Now().UTC().Format(time.RFC3339Nano)
     if _, err := tx.ExecContext(ctx, `UPDATE sales_orders SET status=?,version=version+1,updated_at=? WHERE id=? AND status NOT IN ('cancelled','returned')`, status, now, orderID); err != nil { return Summary{},err }
-    balance := totalMinor-paid; if balance < 0 { balance=0 }
-    return Summary{OrderID:orderID,TotalMinor:totalMinor,PaidMinor:paid,BalanceMinor:balance,OrderStatus:status},nil
+    return buildSummary(orderID, totalMinor, paid, status),nil
 }
 
 func getByClientIDTx(ctx context.Context, tx *sql.Tx, clientID string) (Payment,error) {
