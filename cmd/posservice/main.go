@@ -10,6 +10,7 @@ import (
 
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/catalog"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/config"
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/customer"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/device"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/server"
@@ -50,7 +51,8 @@ func main() {
     slog.Info("local device identity ready", "device_id", identity.DeviceID, "status", identity.Status)
 
     catalogRepository := catalog.NewRepository(db)
-    app := server.New(cfg, db, deviceService, catalogRepository)
+    customerRepository := customer.NewRepository(db)
+    app := server.New(cfg, db, deviceService, catalogRepository, customerRepository)
 
     ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
     defer stop()
