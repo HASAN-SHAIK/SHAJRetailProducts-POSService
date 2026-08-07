@@ -5,8 +5,11 @@ import (
     "encoding/json"
     "errors"
     "net/http"
+    "strconv"
+    "strings"
     "time"
 
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/catalog"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/config"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/device"
@@ -18,10 +21,11 @@ type Server struct {
     cfg        config.Config
     db         *database.DB
     device     *device.Service
+    catalog    *catalog.Repository
 }
 
-func New(cfg config.Config, db *database.DB, deviceService *device.Service) *Server {
-    s := &Server{cfg: cfg, db: db, device: deviceService, startedAt: time.Now().UTC()}
+func New(cfg config.Config, db *database.DB, deviceService *device.Service, catalogRepository *catalog.Repository) *Server {
+    s := &Server{cfg: cfg, db: db, device: deviceService, catalog: catalogRepository, startedAt: time.Now().UTC()}
 
     mux := http.NewServeMux()
     mux.HandleFunc("GET /api/v1/health", s.handleHealth)
@@ -29,6 +33,10 @@ func New(cfg config.Config, db *database.DB, deviceService *device.Service) *Ser
     mux.HandleFunc("GET /api/v1/device", s.handleGetDevice)
     mux.HandleFunc("PUT /api/v1/device/registration", s.handleDeviceRegistration)
     mux.HandleFunc("POST /api/v1/device/heartbeat", s.handleDeviceHeartbeat)
+    mux.HandleFunc("GET /api/v1/catalog/products", s.handleCatalogSearch)
+    mux.HandleFunc("GET /api/v1/catalog/products/barcode/{barcode}", s.handleCatalogBarcode)
+    mux.HandleFunc("GET /api/v1/catalog/products/{id}", s.handleCatalogProduct)
+    mux.HandleFunc("GET /api/v1/catalog/categories", s.handleCatalogCategories)
 
     s.httpServer = &http.Server{
         Addr:              cfg.ListenAddress,
@@ -44,9 +52,7 @@ func New(cfg config.Config, db *database.DB, deviceService *device.Service) *Ser
 
 func (s *Server) Start() error {
     err := s.httpServer.ListenAndServe()
-    if errors.Is(err, http.ErrServerClosed) {
-        return nil
-    }
+    if errors.Is(err, http.ErrServerClosed) { return nil }
     return err
 }
 
@@ -75,10 +81,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetDevice(w http.ResponseWriter, r *http.Request) {
     identity, err := s.device.Get(r.Context())
-    if err != nil {
-        writeError(w, http.StatusInternalServerError, "device_identity_unavailable")
-        return
-    }
+    if err != nil { writeError(w, http.StatusInternalServerError, "device_identity_unavailable"); return }
     writeJSON(w, http.StatusOK, identity)
 }
 
@@ -86,24 +89,50 @@ func (s *Server) handleDeviceRegistration(w http.ResponseWriter, r *http.Request
     var input device.Registration
     dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
     dec.DisallowUnknownFields()
-    if err := dec.Decode(&input); err != nil {
-        writeError(w, http.StatusBadRequest, "invalid_registration_payload")
-        return
-    }
+    if err := dec.Decode(&input); err != nil { writeError(w, http.StatusBadRequest, "invalid_registration_payload"); return }
     identity, err := s.device.ApplyRegistration(r.Context(), input)
-    if err != nil {
-        writeError(w, http.StatusBadRequest, err.Error())
-        return
-    }
+    if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
     writeJSON(w, http.StatusOK, identity)
 }
 
 func (s *Server) handleDeviceHeartbeat(w http.ResponseWriter, r *http.Request) {
-    if err := s.device.RecordHeartbeat(r.Context()); err != nil {
-        writeError(w, http.StatusInternalServerError, "heartbeat_failed")
-        return
-    }
+    if err := s.device.RecordHeartbeat(r.Context()); err != nil { writeError(w, http.StatusInternalServerError, "heartbeat_failed"); return }
     w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleCatalogSearch(w http.ResponseWriter, r *http.Request) {
+    storeID := s.currentStoreID(r.Context())
+    limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+    products, err := s.catalog.Search(r.Context(), r.URL.Query().Get("q"), storeID, limit)
+    if err != nil { writeError(w, http.StatusInternalServerError, "catalog_search_failed"); return }
+    writeJSON(w, http.StatusOK, map[string]any{"items": products, "count": len(products)})
+}
+
+func (s *Server) handleCatalogBarcode(w http.ResponseWriter, r *http.Request) {
+    product, err := s.catalog.GetByBarcode(r.Context(), r.PathValue("barcode"), s.currentStoreID(r.Context()))
+    if errors.Is(err, catalog.ErrNotFound) { writeError(w, http.StatusNotFound, "product_not_found"); return }
+    if err != nil { writeError(w, http.StatusInternalServerError, "catalog_lookup_failed"); return }
+    writeJSON(w, http.StatusOK, product)
+}
+
+func (s *Server) handleCatalogProduct(w http.ResponseWriter, r *http.Request) {
+    id := strings.TrimSpace(r.PathValue("id"))
+    product, err := s.catalog.GetProduct(r.Context(), id, s.currentStoreID(r.Context()))
+    if errors.Is(err, catalog.ErrNotFound) { writeError(w, http.StatusNotFound, "product_not_found"); return }
+    if err != nil { writeError(w, http.StatusInternalServerError, "catalog_lookup_failed"); return }
+    writeJSON(w, http.StatusOK, product)
+}
+
+func (s *Server) handleCatalogCategories(w http.ResponseWriter, r *http.Request) {
+    categories, err := s.catalog.ListCategories(r.Context())
+    if err != nil { writeError(w, http.StatusInternalServerError, "category_lookup_failed"); return }
+    writeJSON(w, http.StatusOK, map[string]any{"items": categories, "count": len(categories)})
+}
+
+func (s *Server) currentStoreID(ctx context.Context) string {
+    identity, err := s.device.Get(ctx)
+    if err != nil || identity.StoreID == nil { return "" }
+    return *identity.StoreID
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -112,9 +141,7 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
     _ = json.NewEncoder(w).Encode(payload)
 }
 
-func writeError(w http.ResponseWriter, status int, code string) {
-    writeJSON(w, status, map[string]any{"error": code})
-}
+func writeError(w http.ResponseWriter, status int, code string) { writeJSON(w, status, map[string]any{"error": code}) }
 
 func securityHeadersMiddleware(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -127,9 +154,7 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 func requestIDMiddleware(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         requestID := r.Header.Get("X-Request-ID")
-        if requestID == "" {
-            requestID = time.Now().UTC().Format("20060102T150405.000000000")
-        }
+        if requestID == "" { requestID = time.Now().UTC().Format("20060102T150405.000000000") }
         w.Header().Set("X-Request-ID", requestID)
         next.ServeHTTP(w, r)
     })
