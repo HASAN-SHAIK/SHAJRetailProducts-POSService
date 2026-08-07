@@ -11,6 +11,7 @@ import (
 
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/catalog"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/config"
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/customer"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/device"
 )
@@ -22,10 +23,11 @@ type Server struct {
     db         *database.DB
     device     *device.Service
     catalog    *catalog.Repository
+    customers  *customer.Repository
 }
 
-func New(cfg config.Config, db *database.DB, deviceService *device.Service, catalogRepository *catalog.Repository) *Server {
-    s := &Server{cfg: cfg, db: db, device: deviceService, catalog: catalogRepository, startedAt: time.Now().UTC()}
+func New(cfg config.Config, db *database.DB, deviceService *device.Service, catalogRepository *catalog.Repository, customerRepository *customer.Repository) *Server {
+    s := &Server{cfg: cfg, db: db, device: deviceService, catalog: catalogRepository, customers: customerRepository, startedAt: time.Now().UTC()}
 
     mux := http.NewServeMux()
     mux.HandleFunc("GET /api/v1/health", s.handleHealth)
@@ -37,6 +39,10 @@ func New(cfg config.Config, db *database.DB, deviceService *device.Service, cata
     mux.HandleFunc("GET /api/v1/catalog/products/barcode/{barcode}", s.handleCatalogBarcode)
     mux.HandleFunc("GET /api/v1/catalog/products/{id}", s.handleCatalogProduct)
     mux.HandleFunc("GET /api/v1/catalog/categories", s.handleCatalogCategories)
+    mux.HandleFunc("GET /api/v1/customers", s.handleCustomerSearch)
+    mux.HandleFunc("POST /api/v1/customers", s.handleCustomerCreate)
+    mux.HandleFunc("GET /api/v1/customers/{id}", s.handleCustomerGet)
+    mux.HandleFunc("PUT /api/v1/customers/{id}", s.handleCustomerUpdate)
 
     s.httpServer = &http.Server{
         Addr:              cfg.ListenAddress,
@@ -127,6 +133,50 @@ func (s *Server) handleCatalogCategories(w http.ResponseWriter, r *http.Request)
     categories, err := s.catalog.ListCategories(r.Context())
     if err != nil { writeError(w, http.StatusInternalServerError, "category_lookup_failed"); return }
     writeJSON(w, http.StatusOK, map[string]any{"items": categories, "count": len(categories)})
+}
+
+func (s *Server) handleCustomerSearch(w http.ResponseWriter, r *http.Request) {
+    limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+    items, err := s.customers.Search(r.Context(), r.URL.Query().Get("q"), limit)
+    if err != nil { writeError(w, http.StatusInternalServerError, "customer_search_failed"); return }
+    writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
+}
+
+func (s *Server) handleCustomerGet(w http.ResponseWriter, r *http.Request) {
+    item, err := s.customers.Get(r.Context(), r.PathValue("id"))
+    if errors.Is(err, customer.ErrNotFound) { writeError(w, http.StatusNotFound, "customer_not_found"); return }
+    if err != nil { writeError(w, http.StatusInternalServerError, "customer_lookup_failed"); return }
+    writeJSON(w, http.StatusOK, item)
+}
+
+func (s *Server) handleCustomerCreate(w http.ResponseWriter, r *http.Request) {
+    var input customer.UpsertInput
+    dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10))
+    dec.DisallowUnknownFields()
+    if err := dec.Decode(&input); err != nil { writeError(w, http.StatusBadRequest, "invalid_customer_payload"); return }
+    item, err := s.customers.Create(r.Context(), input)
+    if err != nil { writeError(w, http.StatusBadRequest, normalizeCustomerError(err)); return }
+    writeJSON(w, http.StatusCreated, item)
+}
+
+func (s *Server) handleCustomerUpdate(w http.ResponseWriter, r *http.Request) {
+    var input customer.UpsertInput
+    dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10))
+    dec.DisallowUnknownFields()
+    if err := dec.Decode(&input); err != nil { writeError(w, http.StatusBadRequest, "invalid_customer_payload"); return }
+    item, err := s.customers.Update(r.Context(), r.PathValue("id"), input)
+    if errors.Is(err, customer.ErrNotFound) { writeError(w, http.StatusNotFound, "customer_not_found"); return }
+    if err != nil { writeError(w, http.StatusBadRequest, normalizeCustomerError(err)); return }
+    writeJSON(w, http.StatusOK, item)
+}
+
+func normalizeCustomerError(err error) string {
+    switch err.Error() {
+    case "customer_name_required", "invalid_credit_limit", "invalid_currency":
+        return err.Error()
+    default:
+        return "customer_write_failed"
+    }
 }
 
 func (s *Server) currentStoreID(ctx context.Context) string {
