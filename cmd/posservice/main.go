@@ -8,6 +8,7 @@ import (
     "syscall"
     "time"
 
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/catalog"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/config"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/device"
@@ -48,7 +49,8 @@ func main() {
     }
     slog.Info("local device identity ready", "device_id", identity.DeviceID, "status", identity.Status)
 
-    app := server.New(cfg, db, deviceService)
+    catalogRepository := catalog.NewRepository(db)
+    app := server.New(cfg, db, deviceService, catalogRepository)
 
     ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
     defer stop()
