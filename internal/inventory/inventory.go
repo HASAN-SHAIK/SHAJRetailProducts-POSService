@@ -71,6 +71,13 @@ func (s *Service) ApplySaleTx(ctx context.Context, tx *sql.Tx, order orders.Orde
             INSERT INTO inventory_movements(id,store_id,product_id,movement_type,quantity_delta_milli,reference_type,reference_id,order_item_id,balance_after_milli,occurred_at,created_at)
             VALUES(?,?,?,'sale_issue',?,?,?,?,?,?,?)`,
             movementID, order.StoreID, item.ProductID, -item.QuantityMilli, refType, refID, orderItemID, after, now, now); err != nil { return err }
+
+        movement := Movement{
+            ID: movementID, StoreID: order.StoreID, ProductID: item.ProductID, MovementType: "sale_issue",
+            QuantityDeltaMilli: -item.QuantityMilli, ReferenceType: &refType, ReferenceID: &refID,
+            OrderItemID: &orderItemID, BalanceAfterMilli: after, OccurredAt: now,
+        }
+        if err := appendMovementEventTx(ctx, tx, movement, order.ID); err != nil { return err }
     }
     return nil
 }
