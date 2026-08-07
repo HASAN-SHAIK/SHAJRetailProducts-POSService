@@ -14,6 +14,8 @@ type Config struct {
     ListenAddress         string
     DatabasePath          string
     CentralAPIURL         string
+    CentralTenantID       string
+    CentralSyncToken      string
     SyncRequestTimeout    time.Duration
     SyncPollInterval      time.Duration
     LocalAPIToken         string
@@ -35,7 +37,9 @@ func Load() (Config, error) {
     databasePath := envOrDefault("POS_DATABASE_PATH", "./data/shajretail-pos.db")
     cfg := Config{
         Environment: envOrDefault("POS_ENVIRONMENT", "development"), ListenAddress: envOrDefault("POS_SERVICE_ADDRESS", "127.0.0.1:4782"),
-        DatabasePath: databasePath, CentralAPIURL: os.Getenv("POS_CENTRAL_API_URL"), SyncRequestTimeout: requestTimeout, SyncPollInterval: pollInterval,
+        DatabasePath: databasePath, CentralAPIURL: strings.TrimRight(strings.TrimSpace(os.Getenv("POS_CENTRAL_API_URL")), "/"),
+        CentralTenantID: strings.TrimSpace(os.Getenv("POS_CENTRAL_TENANT_ID")), CentralSyncToken: strings.TrimSpace(os.Getenv("POS_CENTRAL_SYNC_TOKEN")),
+        SyncRequestTimeout: requestTimeout, SyncPollInterval: pollInterval,
         LocalAPIToken: os.Getenv("POS_LOCAL_API_TOKEN"), LocalTokenFile: envOrDefault("POS_LOCAL_TOKEN_FILE", databasePath+".token"),
         AllowedOrigins: csvEnv("POS_ALLOWED_ORIGINS", []string{"http://localhost:3000","http://127.0.0.1:3000","http://localhost:5173","http://127.0.0.1:5173"}),
         BackupDirectory: envOrDefault("POS_BACKUP_DIRECTORY", databasePath+".backups"), BackupInterval: backupInterval, BackupRetention: retention,
@@ -47,6 +51,7 @@ func Load() (Config, error) {
     if cfg.BackupDirectory == "" { return Config{}, fmt.Errorf("POS_BACKUP_DIRECTORY cannot be empty") }
     if cfg.SyncRequestTimeout <= 0 || cfg.SyncPollInterval <= 0 || cfg.BackupInterval <= 0 || cfg.ObservabilityInterval <= 0 { return Config{}, fmt.Errorf("configured durations must be positive") }
     if cfg.BackupRetention <= 0 { return Config{}, fmt.Errorf("POS_BACKUP_RETENTION must be positive") }
+    if cfg.CentralAPIURL != "" && (cfg.CentralTenantID == "" || cfg.CentralSyncToken == "") { return Config{}, fmt.Errorf("POS_CENTRAL_TENANT_ID and POS_CENTRAL_SYNC_TOKEN are required when central sync is configured") }
     if err := validateLoopbackAddress(cfg.ListenAddress); err != nil { return Config{}, err }
     if len(cfg.AllowedOrigins) == 0 { return Config{}, fmt.Errorf("POS_ALLOWED_ORIGINS must contain at least one origin") }
     return cfg, nil

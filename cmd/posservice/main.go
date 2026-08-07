@@ -44,10 +44,12 @@ func main() {
     app := server.NewSecure(cfg, db, deviceService, catalogRepository, customerRepository, orderService, paymentService, inventoryService, receiptService, localAuth)
 
     eventOutbox := outbox.New(db)
-    syncEngine, err := syncengine.New(eventOutbox, cfg.CentralAPIURL, identity.DeviceID, cfg.SyncRequestTimeout, cfg.SyncPollInterval); if err != nil { slog.Error("configure sync engine", "error", err); os.Exit(1) }
+    syncEngine, err := syncengine.New(eventOutbox, cfg.CentralAPIURL, cfg.CentralTenantID, cfg.CentralSyncToken, identity.DeviceID, cfg.SyncRequestTimeout, cfg.SyncPollInterval); if err != nil { slog.Error("configure sync engine", "error", err); os.Exit(1) }
     inboxService := inbox.New(db)
     var changePuller *changefeed.Puller
-    if cfg.CentralAPIURL != "" { changePuller = changefeed.New(db, inboxService, cfg.CentralAPIURL, identity.DeviceID, cfg.SyncRequestTimeout, cfg.SyncPollInterval) } else { slog.Info("central sync disabled", "reason", "POS_CENTRAL_API_URL is not configured") }
+    if cfg.CentralAPIURL != "" {
+        changePuller = changefeed.New(db, inboxService, cfg.CentralAPIURL, cfg.CentralTenantID, cfg.CentralSyncToken, identity.DeviceID, cfg.SyncRequestTimeout, cfg.SyncPollInterval)
+    } else { slog.Info("central sync disabled", "reason", "POS_CENTRAL_API_URL is not configured") }
     backupService := backup.New(db, cfg.BackupDirectory, cfg.BackupRetention)
     diagnostics := observability.New(db, eventOutbox, cfg.BackupDirectory)
 
