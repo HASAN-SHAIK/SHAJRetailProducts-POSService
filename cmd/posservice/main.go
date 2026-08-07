@@ -13,6 +13,7 @@ import (
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/customer"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/device"
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/orders"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/server"
 )
 
@@ -52,7 +53,8 @@ func main() {
 
     catalogRepository := catalog.NewRepository(db)
     customerRepository := customer.NewRepository(db)
-    app := server.New(cfg, db, deviceService, catalogRepository, customerRepository)
+    orderService := orders.New(db, catalogRepository)
+    app := server.New(cfg, db, deviceService, catalogRepository, customerRepository, orderService)
 
     ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
     defer stop()
