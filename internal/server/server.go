@@ -15,6 +15,7 @@ import (
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/device"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/orders"
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/payments"
 )
 
 type Server struct {
@@ -26,10 +27,11 @@ type Server struct {
     catalog    *catalog.Repository
     customers  *customer.Repository
     orders     *orders.Service
+    payments   *payments.Service
 }
 
-func New(cfg config.Config, db *database.DB, deviceService *device.Service, catalogRepository *catalog.Repository, customerRepository *customer.Repository, orderService *orders.Service) *Server {
-    s := &Server{cfg: cfg, db: db, device: deviceService, catalog: catalogRepository, customers: customerRepository, orders: orderService, startedAt: time.Now().UTC()}
+func New(cfg config.Config, db *database.DB, deviceService *device.Service, catalogRepository *catalog.Repository, customerRepository *customer.Repository, orderService *orders.Service, paymentService *payments.Service) *Server {
+    s := &Server{cfg: cfg, db: db, device: deviceService, catalog: catalogRepository, customers: customerRepository, orders: orderService, payments: paymentService, startedAt: time.Now().UTC()}
 
     mux := http.NewServeMux()
     mux.HandleFunc("GET /api/v1/health", s.handleHealth)
@@ -49,6 +51,8 @@ func New(cfg config.Config, db *database.DB, deviceService *device.Service, cata
     mux.HandleFunc("POST /api/v1/orders", s.handleOrderCreate)
     mux.HandleFunc("GET /api/v1/orders/{id}", s.handleOrderGet)
     mux.HandleFunc("POST /api/v1/orders/{id}/complete", s.handleOrderComplete)
+    mux.HandleFunc("GET /api/v1/orders/{id}/payments", s.handlePaymentList)
+    mux.HandleFunc("POST /api/v1/orders/{id}/payments", s.handlePaymentCreate)
 
     s.httpServer = &http.Server{Addr: cfg.ListenAddress, Handler: requestIDMiddleware(securityHeadersMiddleware(mux)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
     return s
@@ -57,18 +61,10 @@ func New(cfg config.Config, db *database.DB, deviceService *device.Service, cata
 func (s *Server) Start() error { err := s.httpServer.ListenAndServe(); if errors.Is(err, http.ErrServerClosed) { return nil }; return err }
 func (s *Server) Shutdown(ctx context.Context) error { return s.httpServer.Shutdown(ctx) }
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-    writeJSON(w, http.StatusOK, map[string]any{"status":"ok","service":"shajretail-pos-service","environment":s.cfg.Environment,"started_at":s.startedAt,"uptime_ms":time.Since(s.startedAt).Milliseconds()})
-}
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) { writeJSON(w,http.StatusOK,map[string]any{"status":"ok","service":"shajretail-pos-service","environment":s.cfg.Environment,"started_at":s.startedAt,"uptime_ms":time.Since(s.startedAt).Milliseconds()}) }
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) { ctx,cancel:=context.WithTimeout(r.Context(),2*time.Second); defer cancel(); if err:=s.db.Ping(ctx); err!=nil { writeJSON(w,http.StatusServiceUnavailable,map[string]any{"status":"not_ready","reason":"database_unavailable"}); return }; if _,err:=s.device.Get(ctx); err!=nil { writeJSON(w,http.StatusServiceUnavailable,map[string]any{"status":"not_ready","reason":"device_identity_unavailable"}); return }; writeJSON(w,http.StatusOK,map[string]any{"status":"ready"}) }
 
-func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
-    ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second); defer cancel()
-    if err := s.db.Ping(ctx); err != nil { writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status":"not_ready","reason":"database_unavailable"}); return }
-    if _, err := s.device.Get(ctx); err != nil { writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status":"not_ready","reason":"device_identity_unavailable"}); return }
-    writeJSON(w, http.StatusOK, map[string]any{"status":"ready"})
-}
-
-func (s *Server) handleGetDevice(w http.ResponseWriter, r *http.Request) { identity, err := s.device.Get(r.Context()); if err != nil { writeError(w,http.StatusInternalServerError,"device_identity_unavailable"); return }; writeJSON(w,http.StatusOK,identity) }
+func (s *Server) handleGetDevice(w http.ResponseWriter, r *http.Request) { identity,err:=s.device.Get(r.Context()); if err!=nil { writeError(w,http.StatusInternalServerError,"device_identity_unavailable"); return }; writeJSON(w,http.StatusOK,identity) }
 func (s *Server) handleDeviceRegistration(w http.ResponseWriter, r *http.Request) { var input device.Registration; dec:=json.NewDecoder(http.MaxBytesReader(w,r.Body,64<<10)); dec.DisallowUnknownFields(); if err:=dec.Decode(&input); err!=nil { writeError(w,http.StatusBadRequest,"invalid_registration_payload"); return }; identity,err:=s.device.ApplyRegistration(r.Context(),input); if err!=nil { writeError(w,http.StatusBadRequest,err.Error()); return }; writeJSON(w,http.StatusOK,identity) }
 func (s *Server) handleDeviceHeartbeat(w http.ResponseWriter, r *http.Request) { if err:=s.device.RecordHeartbeat(r.Context()); err!=nil { writeError(w,http.StatusInternalServerError,"heartbeat_failed"); return }; w.WriteHeader(http.StatusNoContent) }
 
@@ -82,29 +78,27 @@ func (s *Server) handleCustomerGet(w http.ResponseWriter, r *http.Request) { ite
 func (s *Server) handleCustomerCreate(w http.ResponseWriter, r *http.Request) { var input customer.UpsertInput; dec:=json.NewDecoder(http.MaxBytesReader(w,r.Body,128<<10)); dec.DisallowUnknownFields(); if err:=dec.Decode(&input); err!=nil { writeError(w,http.StatusBadRequest,"invalid_customer_payload"); return }; item,err:=s.customers.Create(r.Context(),input); if err!=nil { writeError(w,http.StatusBadRequest,normalizeCustomerError(err)); return }; writeJSON(w,http.StatusCreated,item) }
 func (s *Server) handleCustomerUpdate(w http.ResponseWriter, r *http.Request) { var input customer.UpsertInput; dec:=json.NewDecoder(http.MaxBytesReader(w,r.Body,128<<10)); dec.DisallowUnknownFields(); if err:=dec.Decode(&input); err!=nil { writeError(w,http.StatusBadRequest,"invalid_customer_payload"); return }; item,err:=s.customers.Update(r.Context(),r.PathValue("id"),input); if errors.Is(err,customer.ErrNotFound) { writeError(w,http.StatusNotFound,"customer_not_found"); return }; if err!=nil { writeError(w,http.StatusBadRequest,normalizeCustomerError(err)); return }; writeJSON(w,http.StatusOK,item) }
 
-func (s *Server) handleOrderCreate(w http.ResponseWriter, r *http.Request) {
-    var input orders.CreateInput
-    dec:=json.NewDecoder(http.MaxBytesReader(w,r.Body,512<<10)); dec.DisallowUnknownFields()
-    if err:=dec.Decode(&input); err!=nil { writeError(w,http.StatusBadRequest,"invalid_order_payload"); return }
-    identity,err:=s.device.Get(r.Context()); if err!=nil || identity.StoreID==nil { writeError(w,http.StatusConflict,"device_not_registered_to_store"); return }
-    input.StoreID=*identity.StoreID; input.TerminalID=identity.TerminalID
-    order,err:=s.orders.Create(r.Context(),input)
-    if errors.Is(err,orders.ErrInvalidOrder) { writeError(w,http.StatusBadRequest,"invalid_order"); return }
-    if err!=nil { writeError(w,http.StatusBadRequest,"order_create_failed"); return }
-    writeJSON(w,http.StatusCreated,order)
+func (s *Server) handleOrderCreate(w http.ResponseWriter, r *http.Request) { var input orders.CreateInput; dec:=json.NewDecoder(http.MaxBytesReader(w,r.Body,512<<10)); dec.DisallowUnknownFields(); if err:=dec.Decode(&input); err!=nil { writeError(w,http.StatusBadRequest,"invalid_order_payload"); return }; identity,err:=s.device.Get(r.Context()); if err!=nil || identity.StoreID==nil { writeError(w,http.StatusConflict,"device_not_registered_to_store"); return }; input.StoreID=*identity.StoreID; input.TerminalID=identity.TerminalID; order,err:=s.orders.Create(r.Context(),input); if errors.Is(err,orders.ErrInvalidOrder) { writeError(w,http.StatusBadRequest,"invalid_order"); return }; if err!=nil { writeError(w,http.StatusBadRequest,"order_create_failed"); return }; writeJSON(w,http.StatusCreated,order) }
+func (s *Server) handleOrderGet(w http.ResponseWriter, r *http.Request) { order,err:=s.orders.Get(r.Context(),r.PathValue("id")); if errors.Is(err,orders.ErrNotFound) { writeError(w,http.StatusNotFound,"order_not_found"); return }; if err!=nil { writeError(w,http.StatusInternalServerError,"order_lookup_failed"); return }; writeJSON(w,http.StatusOK,order) }
+func (s *Server) handleOrderList(w http.ResponseWriter, r *http.Request) { storeID:=s.currentStoreID(r.Context()); if storeID=="" { writeError(w,http.StatusConflict,"device_not_registered_to_store"); return }; limit,_:=strconv.Atoi(r.URL.Query().Get("limit")); items,err:=s.orders.List(r.Context(),storeID,r.URL.Query().Get("status"),limit); if err!=nil { writeError(w,http.StatusInternalServerError,"order_list_failed"); return }; writeJSON(w,http.StatusOK,map[string]any{"items":items,"count":len(items)}) }
+func (s *Server) handleOrderComplete(w http.ResponseWriter, r *http.Request) { order,err:=s.orders.Complete(r.Context(),r.PathValue("id")); if errors.Is(err,orders.ErrNotFound) { writeError(w,http.StatusNotFound,"order_not_found"); return }; if errors.Is(err,orders.ErrAlreadyComplete) { writeError(w,http.StatusConflict,"order_already_complete"); return }; if err!=nil { writeError(w,http.StatusInternalServerError,"order_complete_failed"); return }; writeJSON(w,http.StatusOK,order) }
+
+func (s *Server) handlePaymentCreate(w http.ResponseWriter, r *http.Request) {
+    var input payments.CreateInput
+    dec:=json.NewDecoder(http.MaxBytesReader(w,r.Body,128<<10)); dec.DisallowUnknownFields()
+    if err:=dec.Decode(&input); err!=nil { writeError(w,http.StatusBadRequest,"invalid_payment_payload"); return }
+    payment,summary,err:=s.payments.Create(r.Context(),r.PathValue("id"),input)
+    if errors.Is(err,payments.ErrOrderNotFound) { writeError(w,http.StatusNotFound,"order_not_found"); return }
+    if errors.Is(err,payments.ErrInvalidPayment) { writeError(w,http.StatusBadRequest,"invalid_payment"); return }
+    if err!=nil { writeError(w,http.StatusInternalServerError,"payment_create_failed"); return }
+    writeJSON(w,http.StatusCreated,map[string]any{"payment":payment,"summary":summary})
 }
 
-func (s *Server) handleOrderGet(w http.ResponseWriter, r *http.Request) {
-    order,err:=s.orders.Get(r.Context(),r.PathValue("id")); if errors.Is(err,orders.ErrNotFound) { writeError(w,http.StatusNotFound,"order_not_found"); return }; if err!=nil { writeError(w,http.StatusInternalServerError,"order_lookup_failed"); return }; writeJSON(w,http.StatusOK,order)
-}
-
-func (s *Server) handleOrderList(w http.ResponseWriter, r *http.Request) {
-    storeID:=s.currentStoreID(r.Context()); if storeID=="" { writeError(w,http.StatusConflict,"device_not_registered_to_store"); return }
-    limit,_:=strconv.Atoi(r.URL.Query().Get("limit")); items,err:=s.orders.List(r.Context(),storeID,r.URL.Query().Get("status"),limit); if err!=nil { writeError(w,http.StatusInternalServerError,"order_list_failed"); return }; writeJSON(w,http.StatusOK,map[string]any{"items":items,"count":len(items)})
-}
-
-func (s *Server) handleOrderComplete(w http.ResponseWriter, r *http.Request) {
-    order,err:=s.orders.Complete(r.Context(),r.PathValue("id")); if errors.Is(err,orders.ErrNotFound) { writeError(w,http.StatusNotFound,"order_not_found"); return }; if errors.Is(err,orders.ErrAlreadyComplete) { writeError(w,http.StatusConflict,"order_already_complete"); return }; if err!=nil { writeError(w,http.StatusInternalServerError,"order_complete_failed"); return }; writeJSON(w,http.StatusOK,order)
+func (s *Server) handlePaymentList(w http.ResponseWriter, r *http.Request) {
+    items,summary,err:=s.payments.ListForOrder(r.Context(),r.PathValue("id"))
+    if errors.Is(err,payments.ErrOrderNotFound) { writeError(w,http.StatusNotFound,"order_not_found"); return }
+    if err!=nil { writeError(w,http.StatusInternalServerError,"payment_list_failed"); return }
+    writeJSON(w,http.StatusOK,map[string]any{"items":items,"count":len(items),"summary":summary})
 }
 
 func normalizeCustomerError(err error) string { switch err.Error() { case "customer_name_required","invalid_credit_limit","invalid_currency": return err.Error(); default: return "customer_write_failed" } }
