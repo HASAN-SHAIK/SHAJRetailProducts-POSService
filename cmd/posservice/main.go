@@ -10,6 +10,7 @@ import (
 
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/config"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/device"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/server"
 )
 
@@ -39,7 +40,15 @@ func main() {
         os.Exit(1)
     }
 
-    app := server.New(cfg, db)
+    deviceService := device.New(db)
+    identity, err := deviceService.EnsureInstallation(startupCtx)
+    if err != nil {
+        slog.Error("initialize device identity", "error", err)
+        os.Exit(1)
+    }
+    slog.Info("local device identity ready", "device_id", identity.DeviceID, "status", identity.Status)
+
+    app := server.New(cfg, db, deviceService)
 
     ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
     defer stop()
