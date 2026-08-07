@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/outbox"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/testutil"
 )
@@ -136,7 +137,7 @@ func TestRealCentralOrderE2E(t *testing.T) {
 	assertRealCentralOutboxState(t, db, eventID, "published")
 }
 
-func assertRealCentralOutboxState(t *testing.T, db interface{ SQL() *sql.DB }, eventID, want string) {
+func assertRealCentralOutboxState(t *testing.T, db *database.DB, eventID, want string) {
 	t.Helper()
 	var got string
 	if err := db.SQL().QueryRow(`SELECT status FROM outbox_events WHERE id=?`, eventID).Scan(&got); err != nil {
