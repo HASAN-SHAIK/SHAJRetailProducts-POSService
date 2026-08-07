@@ -10,24 +10,26 @@ import (
 )
 
 type Config struct {
-    Environment        string
-    ListenAddress      string
-    DatabasePath       string
-    CentralAPIURL      string
-    SyncRequestTimeout time.Duration
-    SyncPollInterval   time.Duration
-    LocalAPIToken      string
-    LocalTokenFile     string
-    AllowedOrigins     []string
-    BackupDirectory    string
-    BackupInterval     time.Duration
-    BackupRetention    int
+    Environment           string
+    ListenAddress         string
+    DatabasePath          string
+    CentralAPIURL         string
+    SyncRequestTimeout    time.Duration
+    SyncPollInterval      time.Duration
+    LocalAPIToken         string
+    LocalTokenFile        string
+    AllowedOrigins        []string
+    BackupDirectory       string
+    BackupInterval        time.Duration
+    BackupRetention       int
+    ObservabilityInterval time.Duration
 }
 
 func Load() (Config, error) {
     requestTimeout, err := durationEnv("POS_SYNC_REQUEST_TIMEOUT", 10*time.Second); if err != nil { return Config{}, err }
     pollInterval, err := durationEnv("POS_SYNC_POLL_INTERVAL", 2*time.Second); if err != nil { return Config{}, err }
     backupInterval, err := durationEnv("POS_BACKUP_INTERVAL", 6*time.Hour); if err != nil { return Config{}, err }
+    observabilityInterval, err := durationEnv("POS_OBSERVABILITY_INTERVAL", 30*time.Second); if err != nil { return Config{}, err }
     retention, err := intEnv("POS_BACKUP_RETENTION", 14); if err != nil { return Config{}, err }
 
     databasePath := envOrDefault("POS_DATABASE_PATH", "./data/shajretail-pos.db")
@@ -37,12 +39,13 @@ func Load() (Config, error) {
         LocalAPIToken: os.Getenv("POS_LOCAL_API_TOKEN"), LocalTokenFile: envOrDefault("POS_LOCAL_TOKEN_FILE", databasePath+".token"),
         AllowedOrigins: csvEnv("POS_ALLOWED_ORIGINS", []string{"http://localhost:3000","http://127.0.0.1:3000","http://localhost:5173","http://127.0.0.1:5173"}),
         BackupDirectory: envOrDefault("POS_BACKUP_DIRECTORY", databasePath+".backups"), BackupInterval: backupInterval, BackupRetention: retention,
+        ObservabilityInterval: observabilityInterval,
     }
     if cfg.ListenAddress == "" { return Config{}, fmt.Errorf("POS_SERVICE_ADDRESS cannot be empty") }
     if cfg.DatabasePath == "" { return Config{}, fmt.Errorf("POS_DATABASE_PATH cannot be empty") }
     if cfg.LocalTokenFile == "" { return Config{}, fmt.Errorf("POS_LOCAL_TOKEN_FILE cannot be empty") }
     if cfg.BackupDirectory == "" { return Config{}, fmt.Errorf("POS_BACKUP_DIRECTORY cannot be empty") }
-    if cfg.SyncRequestTimeout <= 0 || cfg.SyncPollInterval <= 0 || cfg.BackupInterval <= 0 { return Config{}, fmt.Errorf("configured durations must be positive") }
+    if cfg.SyncRequestTimeout <= 0 || cfg.SyncPollInterval <= 0 || cfg.BackupInterval <= 0 || cfg.ObservabilityInterval <= 0 { return Config{}, fmt.Errorf("configured durations must be positive") }
     if cfg.BackupRetention <= 0 { return Config{}, fmt.Errorf("POS_BACKUP_RETENTION must be positive") }
     if err := validateLoopbackAddress(cfg.ListenAddress); err != nil { return Config{}, err }
     if len(cfg.AllowedOrigins) == 0 { return Config{}, fmt.Errorf("POS_ALLOWED_ORIGINS must contain at least one origin") }
