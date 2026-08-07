@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/testutil"
 )
 
@@ -40,9 +41,21 @@ func TestCreateAndUpdateEmitVersionedCustomerEvents(t *testing.T) {
 	}
 }
 
-func assertCustomerEvent(t *testing.T, db interface{ SQL() interface{} }, customerID string, version int64, wantName string) {
-	// This helper is intentionally implemented below with the concrete database
-	// handle to keep event payload assertions close to the transactional test.
+func assertCustomerEvent(t *testing.T, db *database.DB, customerID string, version int64, wantName string) {
+	t.Helper()
+	var raw string
+	if err := db.SQL().QueryRow(`SELECT payload_json FROM outbox_events WHERE aggregate_type='customer' AND aggregate_id=? AND aggregate_version=? AND event_type='customer.changed'`, customerID, version).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Customer Customer `json:"customer"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Customer.ID != customerID || payload.Customer.LocalVersion != version || payload.Customer.Name != wantName {
+		t.Fatalf("unexpected customer event: %#v", payload.Customer)
+	}
 }
 
 func TestCustomerEventPayloadMatchesStoredCustomer(t *testing.T) {
