@@ -3,6 +3,8 @@ package outbox
 import (
     "context"
     "database/sql"
+
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/orders"
 )
 
 // EnqueueSaleCompletedTx appends the canonical sale.completed integration
