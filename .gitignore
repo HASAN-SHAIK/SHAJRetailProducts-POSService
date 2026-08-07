@@ -1,0 +1,18 @@
+# Binaries
+bin/
+*.exe
+*.test
+
+# Runtime data
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Environment
+.env
+
+# Editors
+.vscode/
+.idea/
+.DS_Store
