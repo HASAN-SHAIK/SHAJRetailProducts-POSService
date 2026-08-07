@@ -14,6 +14,7 @@ import (
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/customer"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/device"
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/orders"
 )
 
 type Server struct {
@@ -24,10 +25,11 @@ type Server struct {
     device     *device.Service
     catalog    *catalog.Repository
     customers  *customer.Repository
+    orders     *orders.Service
 }
 
-func New(cfg config.Config, db *database.DB, deviceService *device.Service, catalogRepository *catalog.Repository, customerRepository *customer.Repository) *Server {
-    s := &Server{cfg: cfg, db: db, device: deviceService, catalog: catalogRepository, customers: customerRepository, startedAt: time.Now().UTC()}
+func New(cfg config.Config, db *database.DB, deviceService *device.Service, catalogRepository *catalog.Repository, customerRepository *customer.Repository, orderService *orders.Service) *Server {
+    s := &Server{cfg: cfg, db: db, device: deviceService, catalog: catalogRepository, customers: customerRepository, orders: orderService, startedAt: time.Now().UTC()}
 
     mux := http.NewServeMux()
     mux.HandleFunc("GET /api/v1/health", s.handleHealth)
@@ -43,169 +45,71 @@ func New(cfg config.Config, db *database.DB, deviceService *device.Service, cata
     mux.HandleFunc("POST /api/v1/customers", s.handleCustomerCreate)
     mux.HandleFunc("GET /api/v1/customers/{id}", s.handleCustomerGet)
     mux.HandleFunc("PUT /api/v1/customers/{id}", s.handleCustomerUpdate)
+    mux.HandleFunc("GET /api/v1/orders", s.handleOrderList)
+    mux.HandleFunc("POST /api/v1/orders", s.handleOrderCreate)
+    mux.HandleFunc("GET /api/v1/orders/{id}", s.handleOrderGet)
+    mux.HandleFunc("POST /api/v1/orders/{id}/complete", s.handleOrderComplete)
 
-    s.httpServer = &http.Server{
-        Addr:              cfg.ListenAddress,
-        Handler:           requestIDMiddleware(securityHeadersMiddleware(mux)),
-        ReadHeaderTimeout: 5 * time.Second,
-        ReadTimeout:       15 * time.Second,
-        WriteTimeout:      15 * time.Second,
-        IdleTimeout:       60 * time.Second,
-    }
-
+    s.httpServer = &http.Server{Addr: cfg.ListenAddress, Handler: requestIDMiddleware(securityHeadersMiddleware(mux)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
     return s
 }
 
-func (s *Server) Start() error {
-    err := s.httpServer.ListenAndServe()
-    if errors.Is(err, http.ErrServerClosed) { return nil }
-    return err
-}
-
+func (s *Server) Start() error { err := s.httpServer.ListenAndServe(); if errors.Is(err, http.ErrServerClosed) { return nil }; return err }
 func (s *Server) Shutdown(ctx context.Context) error { return s.httpServer.Shutdown(ctx) }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-    writeJSON(w, http.StatusOK, map[string]any{
-        "status": "ok", "service": "shajretail-pos-service", "environment": s.cfg.Environment,
-        "started_at": s.startedAt, "uptime_ms": time.Since(s.startedAt).Milliseconds(),
-    })
+    writeJSON(w, http.StatusOK, map[string]any{"status":"ok","service":"shajretail-pos-service","environment":s.cfg.Environment,"started_at":s.startedAt,"uptime_ms":time.Since(s.startedAt).Milliseconds()})
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
-    ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-    defer cancel()
-    if err := s.db.Ping(ctx); err != nil {
-        writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not_ready", "reason": "database_unavailable"})
-        return
-    }
-    if _, err := s.device.Get(ctx); err != nil {
-        writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "not_ready", "reason": "device_identity_unavailable"})
-        return
-    }
-    writeJSON(w, http.StatusOK, map[string]any{"status": "ready"})
+    ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second); defer cancel()
+    if err := s.db.Ping(ctx); err != nil { writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status":"not_ready","reason":"database_unavailable"}); return }
+    if _, err := s.device.Get(ctx); err != nil { writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status":"not_ready","reason":"device_identity_unavailable"}); return }
+    writeJSON(w, http.StatusOK, map[string]any{"status":"ready"})
 }
 
-func (s *Server) handleGetDevice(w http.ResponseWriter, r *http.Request) {
-    identity, err := s.device.Get(r.Context())
-    if err != nil { writeError(w, http.StatusInternalServerError, "device_identity_unavailable"); return }
-    writeJSON(w, http.StatusOK, identity)
+func (s *Server) handleGetDevice(w http.ResponseWriter, r *http.Request) { identity, err := s.device.Get(r.Context()); if err != nil { writeError(w,http.StatusInternalServerError,"device_identity_unavailable"); return }; writeJSON(w,http.StatusOK,identity) }
+func (s *Server) handleDeviceRegistration(w http.ResponseWriter, r *http.Request) { var input device.Registration; dec:=json.NewDecoder(http.MaxBytesReader(w,r.Body,64<<10)); dec.DisallowUnknownFields(); if err:=dec.Decode(&input); err!=nil { writeError(w,http.StatusBadRequest,"invalid_registration_payload"); return }; identity,err:=s.device.ApplyRegistration(r.Context(),input); if err!=nil { writeError(w,http.StatusBadRequest,err.Error()); return }; writeJSON(w,http.StatusOK,identity) }
+func (s *Server) handleDeviceHeartbeat(w http.ResponseWriter, r *http.Request) { if err:=s.device.RecordHeartbeat(r.Context()); err!=nil { writeError(w,http.StatusInternalServerError,"heartbeat_failed"); return }; w.WriteHeader(http.StatusNoContent) }
+
+func (s *Server) handleCatalogSearch(w http.ResponseWriter, r *http.Request) { limit,_:=strconv.Atoi(r.URL.Query().Get("limit")); products,err:=s.catalog.Search(r.Context(),r.URL.Query().Get("q"),s.currentStoreID(r.Context()),limit); if err!=nil { writeError(w,http.StatusInternalServerError,"catalog_search_failed"); return }; writeJSON(w,http.StatusOK,map[string]any{"items":products,"count":len(products)}) }
+func (s *Server) handleCatalogBarcode(w http.ResponseWriter, r *http.Request) { product,err:=s.catalog.GetByBarcode(r.Context(),r.PathValue("barcode"),s.currentStoreID(r.Context())); if errors.Is(err,catalog.ErrNotFound) { writeError(w,http.StatusNotFound,"product_not_found"); return }; if err!=nil { writeError(w,http.StatusInternalServerError,"catalog_lookup_failed"); return }; writeJSON(w,http.StatusOK,product) }
+func (s *Server) handleCatalogProduct(w http.ResponseWriter, r *http.Request) { product,err:=s.catalog.GetProduct(r.Context(),strings.TrimSpace(r.PathValue("id")),s.currentStoreID(r.Context())); if errors.Is(err,catalog.ErrNotFound) { writeError(w,http.StatusNotFound,"product_not_found"); return }; if err!=nil { writeError(w,http.StatusInternalServerError,"catalog_lookup_failed"); return }; writeJSON(w,http.StatusOK,product) }
+func (s *Server) handleCatalogCategories(w http.ResponseWriter, r *http.Request) { categories,err:=s.catalog.ListCategories(r.Context()); if err!=nil { writeError(w,http.StatusInternalServerError,"category_lookup_failed"); return }; writeJSON(w,http.StatusOK,map[string]any{"items":categories,"count":len(categories)}) }
+
+func (s *Server) handleCustomerSearch(w http.ResponseWriter, r *http.Request) { limit,_:=strconv.Atoi(r.URL.Query().Get("limit")); items,err:=s.customers.Search(r.Context(),r.URL.Query().Get("q"),limit); if err!=nil { writeError(w,http.StatusInternalServerError,"customer_search_failed"); return }; writeJSON(w,http.StatusOK,map[string]any{"items":items,"count":len(items)}) }
+func (s *Server) handleCustomerGet(w http.ResponseWriter, r *http.Request) { item,err:=s.customers.Get(r.Context(),r.PathValue("id")); if errors.Is(err,customer.ErrNotFound) { writeError(w,http.StatusNotFound,"customer_not_found"); return }; if err!=nil { writeError(w,http.StatusInternalServerError,"customer_lookup_failed"); return }; writeJSON(w,http.StatusOK,item) }
+func (s *Server) handleCustomerCreate(w http.ResponseWriter, r *http.Request) { var input customer.UpsertInput; dec:=json.NewDecoder(http.MaxBytesReader(w,r.Body,128<<10)); dec.DisallowUnknownFields(); if err:=dec.Decode(&input); err!=nil { writeError(w,http.StatusBadRequest,"invalid_customer_payload"); return }; item,err:=s.customers.Create(r.Context(),input); if err!=nil { writeError(w,http.StatusBadRequest,normalizeCustomerError(err)); return }; writeJSON(w,http.StatusCreated,item) }
+func (s *Server) handleCustomerUpdate(w http.ResponseWriter, r *http.Request) { var input customer.UpsertInput; dec:=json.NewDecoder(http.MaxBytesReader(w,r.Body,128<<10)); dec.DisallowUnknownFields(); if err:=dec.Decode(&input); err!=nil { writeError(w,http.StatusBadRequest,"invalid_customer_payload"); return }; item,err:=s.customers.Update(r.Context(),r.PathValue("id"),input); if errors.Is(err,customer.ErrNotFound) { writeError(w,http.StatusNotFound,"customer_not_found"); return }; if err!=nil { writeError(w,http.StatusBadRequest,normalizeCustomerError(err)); return }; writeJSON(w,http.StatusOK,item) }
+
+func (s *Server) handleOrderCreate(w http.ResponseWriter, r *http.Request) {
+    var input orders.CreateInput
+    dec:=json.NewDecoder(http.MaxBytesReader(w,r.Body,512<<10)); dec.DisallowUnknownFields()
+    if err:=dec.Decode(&input); err!=nil { writeError(w,http.StatusBadRequest,"invalid_order_payload"); return }
+    identity,err:=s.device.Get(r.Context()); if err!=nil || identity.StoreID==nil { writeError(w,http.StatusConflict,"device_not_registered_to_store"); return }
+    input.StoreID=*identity.StoreID; input.TerminalID=identity.TerminalID
+    order,err:=s.orders.Create(r.Context(),input)
+    if errors.Is(err,orders.ErrInvalidOrder) { writeError(w,http.StatusBadRequest,"invalid_order"); return }
+    if err!=nil { writeError(w,http.StatusBadRequest,"order_create_failed"); return }
+    writeJSON(w,http.StatusCreated,order)
 }
 
-func (s *Server) handleDeviceRegistration(w http.ResponseWriter, r *http.Request) {
-    var input device.Registration
-    dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
-    dec.DisallowUnknownFields()
-    if err := dec.Decode(&input); err != nil { writeError(w, http.StatusBadRequest, "invalid_registration_payload"); return }
-    identity, err := s.device.ApplyRegistration(r.Context(), input)
-    if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
-    writeJSON(w, http.StatusOK, identity)
+func (s *Server) handleOrderGet(w http.ResponseWriter, r *http.Request) {
+    order,err:=s.orders.Get(r.Context(),r.PathValue("id")); if errors.Is(err,orders.ErrNotFound) { writeError(w,http.StatusNotFound,"order_not_found"); return }; if err!=nil { writeError(w,http.StatusInternalServerError,"order_lookup_failed"); return }; writeJSON(w,http.StatusOK,order)
 }
 
-func (s *Server) handleDeviceHeartbeat(w http.ResponseWriter, r *http.Request) {
-    if err := s.device.RecordHeartbeat(r.Context()); err != nil { writeError(w, http.StatusInternalServerError, "heartbeat_failed"); return }
-    w.WriteHeader(http.StatusNoContent)
+func (s *Server) handleOrderList(w http.ResponseWriter, r *http.Request) {
+    storeID:=s.currentStoreID(r.Context()); if storeID=="" { writeError(w,http.StatusConflict,"device_not_registered_to_store"); return }
+    limit,_:=strconv.Atoi(r.URL.Query().Get("limit")); items,err:=s.orders.List(r.Context(),storeID,r.URL.Query().Get("status"),limit); if err!=nil { writeError(w,http.StatusInternalServerError,"order_list_failed"); return }; writeJSON(w,http.StatusOK,map[string]any{"items":items,"count":len(items)})
 }
 
-func (s *Server) handleCatalogSearch(w http.ResponseWriter, r *http.Request) {
-    storeID := s.currentStoreID(r.Context())
-    limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-    products, err := s.catalog.Search(r.Context(), r.URL.Query().Get("q"), storeID, limit)
-    if err != nil { writeError(w, http.StatusInternalServerError, "catalog_search_failed"); return }
-    writeJSON(w, http.StatusOK, map[string]any{"items": products, "count": len(products)})
+func (s *Server) handleOrderComplete(w http.ResponseWriter, r *http.Request) {
+    order,err:=s.orders.Complete(r.Context(),r.PathValue("id")); if errors.Is(err,orders.ErrNotFound) { writeError(w,http.StatusNotFound,"order_not_found"); return }; if errors.Is(err,orders.ErrAlreadyComplete) { writeError(w,http.StatusConflict,"order_already_complete"); return }; if err!=nil { writeError(w,http.StatusInternalServerError,"order_complete_failed"); return }; writeJSON(w,http.StatusOK,order)
 }
 
-func (s *Server) handleCatalogBarcode(w http.ResponseWriter, r *http.Request) {
-    product, err := s.catalog.GetByBarcode(r.Context(), r.PathValue("barcode"), s.currentStoreID(r.Context()))
-    if errors.Is(err, catalog.ErrNotFound) { writeError(w, http.StatusNotFound, "product_not_found"); return }
-    if err != nil { writeError(w, http.StatusInternalServerError, "catalog_lookup_failed"); return }
-    writeJSON(w, http.StatusOK, product)
-}
-
-func (s *Server) handleCatalogProduct(w http.ResponseWriter, r *http.Request) {
-    id := strings.TrimSpace(r.PathValue("id"))
-    product, err := s.catalog.GetProduct(r.Context(), id, s.currentStoreID(r.Context()))
-    if errors.Is(err, catalog.ErrNotFound) { writeError(w, http.StatusNotFound, "product_not_found"); return }
-    if err != nil { writeError(w, http.StatusInternalServerError, "catalog_lookup_failed"); return }
-    writeJSON(w, http.StatusOK, product)
-}
-
-func (s *Server) handleCatalogCategories(w http.ResponseWriter, r *http.Request) {
-    categories, err := s.catalog.ListCategories(r.Context())
-    if err != nil { writeError(w, http.StatusInternalServerError, "category_lookup_failed"); return }
-    writeJSON(w, http.StatusOK, map[string]any{"items": categories, "count": len(categories)})
-}
-
-func (s *Server) handleCustomerSearch(w http.ResponseWriter, r *http.Request) {
-    limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-    items, err := s.customers.Search(r.Context(), r.URL.Query().Get("q"), limit)
-    if err != nil { writeError(w, http.StatusInternalServerError, "customer_search_failed"); return }
-    writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
-}
-
-func (s *Server) handleCustomerGet(w http.ResponseWriter, r *http.Request) {
-    item, err := s.customers.Get(r.Context(), r.PathValue("id"))
-    if errors.Is(err, customer.ErrNotFound) { writeError(w, http.StatusNotFound, "customer_not_found"); return }
-    if err != nil { writeError(w, http.StatusInternalServerError, "customer_lookup_failed"); return }
-    writeJSON(w, http.StatusOK, item)
-}
-
-func (s *Server) handleCustomerCreate(w http.ResponseWriter, r *http.Request) {
-    var input customer.UpsertInput
-    dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10))
-    dec.DisallowUnknownFields()
-    if err := dec.Decode(&input); err != nil { writeError(w, http.StatusBadRequest, "invalid_customer_payload"); return }
-    item, err := s.customers.Create(r.Context(), input)
-    if err != nil { writeError(w, http.StatusBadRequest, normalizeCustomerError(err)); return }
-    writeJSON(w, http.StatusCreated, item)
-}
-
-func (s *Server) handleCustomerUpdate(w http.ResponseWriter, r *http.Request) {
-    var input customer.UpsertInput
-    dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10))
-    dec.DisallowUnknownFields()
-    if err := dec.Decode(&input); err != nil { writeError(w, http.StatusBadRequest, "invalid_customer_payload"); return }
-    item, err := s.customers.Update(r.Context(), r.PathValue("id"), input)
-    if errors.Is(err, customer.ErrNotFound) { writeError(w, http.StatusNotFound, "customer_not_found"); return }
-    if err != nil { writeError(w, http.StatusBadRequest, normalizeCustomerError(err)); return }
-    writeJSON(w, http.StatusOK, item)
-}
-
-func normalizeCustomerError(err error) string {
-    switch err.Error() {
-    case "customer_name_required", "invalid_credit_limit", "invalid_currency":
-        return err.Error()
-    default:
-        return "customer_write_failed"
-    }
-}
-
-func (s *Server) currentStoreID(ctx context.Context) string {
-    identity, err := s.device.Get(ctx)
-    if err != nil || identity.StoreID == nil { return "" }
-    return *identity.StoreID
-}
-
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(status)
-    _ = json.NewEncoder(w).Encode(payload)
-}
-
-func writeError(w http.ResponseWriter, status int, code string) { writeJSON(w, status, map[string]any{"error": code}) }
-
-func securityHeadersMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("X-Content-Type-Options", "nosniff")
-        w.Header().Set("Cache-Control", "no-store")
-        next.ServeHTTP(w, r)
-    })
-}
-
-func requestIDMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        requestID := r.Header.Get("X-Request-ID")
-        if requestID == "" { requestID = time.Now().UTC().Format("20060102T150405.000000000") }
-        w.Header().Set("X-Request-ID", requestID)
-        next.ServeHTTP(w, r)
-    })
-}
+func normalizeCustomerError(err error) string { switch err.Error() { case "customer_name_required","invalid_credit_limit","invalid_currency": return err.Error(); default: return "customer_write_failed" } }
+func (s *Server) currentStoreID(ctx context.Context) string { identity,err:=s.device.Get(ctx); if err!=nil || identity.StoreID==nil { return "" }; return *identity.StoreID }
+func writeJSON(w http.ResponseWriter,status int,payload any){ w.Header().Set("Content-Type","application/json"); w.WriteHeader(status); _=json.NewEncoder(w).Encode(payload) }
+func writeError(w http.ResponseWriter,status int,code string){ writeJSON(w,status,map[string]any{"error":code}) }
+func securityHeadersMiddleware(next http.Handler) http.Handler { return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){ w.Header().Set("X-Content-Type-Options","nosniff"); w.Header().Set("Cache-Control","no-store"); next.ServeHTTP(w,r) }) }
+func requestIDMiddleware(next http.Handler) http.Handler { return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){ requestID:=r.Header.Get("X-Request-ID"); if requestID=="" { requestID=time.Now().UTC().Format("20060102T150405.000000000") }; w.Header().Set("X-Request-ID",requestID); next.ServeHTTP(w,r) }) }
