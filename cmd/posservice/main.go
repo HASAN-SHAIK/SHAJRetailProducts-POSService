@@ -52,7 +52,7 @@ func main() {
     paymentService := payments.New(db)
     inventoryService := inventory.New(db)
     receiptService := receipts.New(db)
-    app := server.New(cfg, db, deviceService, catalogRepository, customerRepository, orderService, paymentService, inventoryService, receiptService, localAuth)
+    app := server.NewSecure(cfg, db, deviceService, catalogRepository, customerRepository, orderService, paymentService, inventoryService, receiptService, localAuth)
 
     eventOutbox := outbox.New(db)
     syncEngine, err := syncengine.New(eventOutbox, cfg.CentralAPIURL, identity.DeviceID, cfg.SyncRequestTimeout, cfg.SyncPollInterval)
