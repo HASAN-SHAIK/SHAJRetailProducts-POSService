@@ -2,7 +2,9 @@ package changefeed
 
 import (
     "context"
+    "database/sql"
     "encoding/json"
+    "errors"
     "fmt"
     "io"
     "log/slog"
@@ -69,7 +71,8 @@ func (p *Puller) pullOnce(ctx context.Context) (bool,error) {
 func (p *Puller) cursor(ctx context.Context) (string,error) {
     var cursor string
     err:=p.db.SQL().QueryRowContext(ctx,`SELECT cursor_value FROM sync_checkpoints WHERE stream_name='central_changes'`).Scan(&cursor)
-    if err!=nil { if strings.Contains(err.Error(),"no rows") { return "",nil }; return "",err }
+    if errors.Is(err,sql.ErrNoRows) { return "",nil }
+    if err!=nil { return "",err }
     return cursor,nil
 }
 
