@@ -76,6 +76,7 @@ func (s *Service) Create(ctx context.Context, orderID string, input CreateInput)
     if input.Direction != "in" && input.Direction != "out" { return Payment{}, Summary{}, ErrInvalidPayment }
     if input.Status == "" { input.Status = "captured" }
     if !validStatus(input.Status) { return Payment{}, Summary{}, ErrInvalidPayment }
+    if len(input.ProviderPayload) > 0 && !json.Valid(input.ProviderPayload) { return Payment{}, Summary{}, ErrInvalidPayment }
 
     var created Payment
     var summary Summary
@@ -92,9 +93,9 @@ func (s *Service) Create(ctx context.Context, orderID string, input CreateInput)
 
         existing, err := getByClientIDTx(ctx, tx, input.ClientPaymentID)
         if err == nil {
-            if existing.OrderID != orderID { return ErrInvalidPayment }
+            if existing.OrderID != orderID || !paymentMatchesInput(existing, input) { return ErrInvalidPayment }
             created = existing
-            summary, err = recalcOrderPaymentState(ctx, tx, orderID, totalMinor)
+            summary, err = paymentSummaryTx(ctx, tx, orderID, totalMinor)
             return err
         }
         if !errors.Is(err, ErrNotFound) { return err }
@@ -104,7 +105,6 @@ func (s *Service) Create(ctx context.Context, orderID string, input CreateInput)
         if err != nil { return err }
         var providerPayload any
         if len(input.ProviderPayload) > 0 {
-            if !json.Valid(input.ProviderPayload) { return ErrInvalidPayment }
             providerPayload = string(input.ProviderPayload)
         }
         _, err = tx.ExecContext(ctx, `INSERT INTO payments(id,order_id,client_payment_id,mode,direction,amount_minor,currency,status,reference,provider,provider_payload_json,recorded_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -140,22 +140,35 @@ func (s *Service) ListForOrder(ctx context.Context, orderID string) ([]Payment, 
 
 func (s *Service) summary(ctx context.Context, orderID string, totalMinor int64) (Summary,error) {
     var paid int64
-    if err := s.db.SQL().QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN status='captured' AND direction='in' THEN amount_minor WHEN status IN ('captured','refunded') AND direction='out' THEN -amount_minor ELSE 0 END),0) FROM payments WHERE order_id=?`, orderID).Scan(&paid); err != nil { return Summary{},err }
+    if err := s.db.SQL().QueryRowContext(ctx, paymentTotalSQL, orderID).Scan(&paid); err != nil { return Summary{},err }
     var status string
     if err := s.db.SQL().QueryRowContext(ctx, `SELECT status FROM sales_orders WHERE id=?`, orderID).Scan(&status); err != nil { return Summary{},err }
+    return buildSummary(orderID, totalMinor, paid, status),nil
+}
+
+const paymentTotalSQL = `SELECT COALESCE(SUM(CASE WHEN status='captured' AND direction='in' THEN amount_minor WHEN status IN ('captured','refunded') AND direction='out' THEN -amount_minor ELSE 0 END),0) FROM payments WHERE order_id=?`
+
+func paymentSummaryTx(ctx context.Context, tx *sql.Tx, orderID string, totalMinor int64) (Summary,error) {
+    var paid int64
+    if err := tx.QueryRowContext(ctx, paymentTotalSQL, orderID).Scan(&paid); err != nil { return Summary{},err }
+    var status string
+    if err := tx.QueryRowContext(ctx, `SELECT status FROM sales_orders WHERE id=?`, orderID).Scan(&status); err != nil { return Summary{},err }
+    return buildSummary(orderID, totalMinor, paid, status),nil
+}
+
+func buildSummary(orderID string, totalMinor, paid int64, status string) Summary {
     balance := totalMinor-paid; if balance < 0 { balance = 0 }
-    return Summary{OrderID:orderID,TotalMinor:totalMinor,PaidMinor:paid,BalanceMinor:balance,OrderStatus:status},nil
+    return Summary{OrderID:orderID,TotalMinor:totalMinor,PaidMinor:paid,BalanceMinor:balance,OrderStatus:status}
 }
 
 func recalcOrderPaymentState(ctx context.Context, tx *sql.Tx, orderID string, totalMinor int64) (Summary,error) {
     var paid int64
-    if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN status='captured' AND direction='in' THEN amount_minor WHEN status IN ('captured','refunded') AND direction='out' THEN -amount_minor ELSE 0 END),0) FROM payments WHERE order_id=?`, orderID).Scan(&paid); err != nil { return Summary{},err }
+    if err := tx.QueryRowContext(ctx, paymentTotalSQL, orderID).Scan(&paid); err != nil { return Summary{},err }
     status := "confirmed"
     if paid <= 0 { status = "confirmed" } else if paid < totalMinor { status = "partially_paid" } else { status = "paid" }
     now := time.Now().UTC().Format(time.RFC3339Nano)
     if _, err := tx.ExecContext(ctx, `UPDATE sales_orders SET status=?,version=version+1,updated_at=? WHERE id=? AND status NOT IN ('cancelled','returned')`, status, now, orderID); err != nil { return Summary{},err }
-    balance := totalMinor-paid; if balance < 0 { balance=0 }
-    return Summary{OrderID:orderID,TotalMinor:totalMinor,PaidMinor:paid,BalanceMinor:balance,OrderStatus:status},nil
+    return buildSummary(orderID, totalMinor, paid, status),nil
 }
 
 func getByClientIDTx(ctx context.Context, tx *sql.Tx, clientID string) (Payment,error) {
