@@ -23,7 +23,7 @@ func New(cfg config.Config, logger *slog.Logger) *App {
     mux.HandleFunc("GET /api/v1/health", app.health)
 
     app.server = &http.Server{
-        Addr:              cfg.Address,
+        Addr:              cfg.ListenAddress,
         Handler:           requestLogger(logger, mux),
         ReadHeaderTimeout: 5 * time.Second,
         ReadTimeout:       15 * time.Second,
@@ -35,7 +35,7 @@ func New(cfg config.Config, logger *slog.Logger) *App {
 }
 
 func (a *App) Start() error {
-    a.logger.Info("starting local POS service", "address", a.cfg.Address, "environment", a.cfg.Environment)
+    a.logger.Info("starting local POS service", "address", a.cfg.ListenAddress, "environment", a.cfg.Environment)
     err := a.server.ListenAndServe()
     if err == http.ErrServerClosed {
         return nil
