@@ -84,34 +84,58 @@ func (r *Repository) Create(ctx context.Context, input UpsertInput) (Customer, e
     id, err := newID()
     if err != nil { return Customer{}, fmt.Errorf("generate customer id: %w", err) }
     now := time.Now().UTC().Format(time.RFC3339Nano)
-    _, err = r.db.SQL().ExecContext(ctx, `
-        INSERT INTO customers(
-            id, customer_code, name, phone, email, tax_id, credit_limit_minor,
-            outstanding_minor, currency, status, source_updated_at, created_at, updated_at,
-            local_version, sync_state
-        ) VALUES(?,?,?,?,?,?,?,0,?,'active',NULL,?,?,1,'pending')`,
-        id, cleanPtr(input.CustomerCode), strings.TrimSpace(input.Name), cleanPtr(input.Phone), cleanPtr(input.Email), cleanPtr(input.TaxID),
-        input.CreditLimitMinor, input.Currency, now, now)
-    if err != nil { return Customer{}, fmt.Errorf("create customer: %w", err) }
-    return r.Get(ctx, id)
+    var created Customer
+    err = r.db.WithTx(ctx, func(tx *sql.Tx) error {
+        _, err := tx.ExecContext(ctx, `
+            INSERT INTO customers(
+                id, customer_code, name, phone, email, tax_id, credit_limit_minor,
+                outstanding_minor, currency, status, source_updated_at, created_at, updated_at,
+                local_version, sync_state
+            ) VALUES(?,?,?,?,?,?,?,0,?,'active',NULL,?,?,1,'pending')`,
+            id, cleanPtr(input.CustomerCode), strings.TrimSpace(input.Name), cleanPtr(input.Phone), cleanPtr(input.Email), cleanPtr(input.TaxID),
+            input.CreditLimitMinor, input.Currency, now, now)
+        if err != nil { return fmt.Errorf("create customer: %w", err) }
+        created, err = getTx(ctx, tx, id)
+        if err != nil { return err }
+        return applyCustomerChangedTx(ctx, tx, created)
+    })
+    if err != nil { return Customer{}, err }
+    return created, nil
 }
 
 func (r *Repository) Update(ctx context.Context, id string, input UpsertInput) (Customer, error) {
     if err := validateInput(&input); err != nil { return Customer{}, err }
     id = strings.TrimSpace(id)
     now := time.Now().UTC().Format(time.RFC3339Nano)
-    result, err := r.db.SQL().ExecContext(ctx, `
-        UPDATE customers SET
-            customer_code = ?, name = ?, phone = ?, email = ?, tax_id = ?,
-            credit_limit_minor = ?, currency = ?, local_version = local_version + 1,
-            sync_state = 'pending', updated_at = ?
-        WHERE id = ?`, cleanPtr(input.CustomerCode), strings.TrimSpace(input.Name), cleanPtr(input.Phone), cleanPtr(input.Email),
-        cleanPtr(input.TaxID), input.CreditLimitMinor, input.Currency, now, id)
-    if err != nil { return Customer{}, fmt.Errorf("update customer: %w", err) }
-    affected, err := result.RowsAffected()
+    var updated Customer
+    err := r.db.WithTx(ctx, func(tx *sql.Tx) error {
+        result, err := tx.ExecContext(ctx, `
+            UPDATE customers SET
+                customer_code = ?, name = ?, phone = ?, email = ?, tax_id = ?,
+                credit_limit_minor = ?, currency = ?, local_version = local_version + 1,
+                sync_state = 'pending', updated_at = ?
+            WHERE id = ?`, cleanPtr(input.CustomerCode), strings.TrimSpace(input.Name), cleanPtr(input.Phone), cleanPtr(input.Email),
+            cleanPtr(input.TaxID), input.CreditLimitMinor, input.Currency, now, id)
+        if err != nil { return fmt.Errorf("update customer: %w", err) }
+        affected, err := result.RowsAffected()
+        if err != nil { return err }
+        if affected == 0 { return ErrNotFound }
+        updated, err = getTx(ctx, tx, id)
+        if err != nil { return err }
+        return applyCustomerChangedTx(ctx, tx, updated)
+    })
     if err != nil { return Customer{}, err }
-    if affected == 0 { return Customer{}, ErrNotFound }
-    return r.Get(ctx, id)
+    return updated, nil
+}
+
+func getTx(ctx context.Context, tx *sql.Tx, id string) (Customer, error) {
+    c, err := scanCustomer(tx.QueryRowContext(ctx, `
+        SELECT id, customer_code, name, phone, email, tax_id, credit_limit_minor,
+               outstanding_minor, currency, status, local_version, sync_state, updated_at
+        FROM customers WHERE id = ?`, id))
+    if errors.Is(err, sql.ErrNoRows) { return Customer{}, ErrNotFound }
+    if err != nil { return Customer{}, fmt.Errorf("get customer: %w", err) }
+    return c, nil
 }
 
 func validateInput(input *UpsertInput) error {
