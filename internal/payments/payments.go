@@ -65,7 +65,7 @@ type Service struct {
     recordedHook RecordedHook
 }
 
-func New(db *database.DB) *Service { return &Service{db: db} }
+func New(db *database.DB) *Service { return &Service{db: db, recordedHook: appendRecordedEventTx} }
 func (s *Service) SetRecordedHook(hook RecordedHook) { s.recordedHook = hook }
 
 func (s *Service) Create(ctx context.Context, orderID string, input CreateInput) (Payment, Summary, error) {
