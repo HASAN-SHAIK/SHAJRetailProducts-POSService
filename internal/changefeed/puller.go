@@ -23,6 +23,8 @@ type Puller struct {
     client *http.Client
     baseURL string
     deviceID string
+    tenantID string
+    syncToken string
     interval time.Duration
 }
 
@@ -32,8 +34,9 @@ type response struct {
     Changes []inbox.Message `json:"changes"`
 }
 
-func New(db *database.DB, inboxService *inbox.Service, baseURL, deviceID string, timeout, interval time.Duration) *Puller {
-    return &Puller{db:db,inbox:inboxService,client:&http.Client{Timeout:timeout},baseURL:strings.TrimRight(baseURL,"/"),deviceID:deviceID,interval:interval}
+func New(db *database.DB, inboxService *inbox.Service, baseURL, tenantID, syncToken, deviceID string, timeout, interval time.Duration) *Puller {
+    return &Puller{db:db,inbox:inboxService,client:&http.Client{Timeout:timeout},baseURL:strings.TrimRight(baseURL,"/"),deviceID:deviceID,
+        tenantID:strings.TrimSpace(tenantID),syncToken:strings.TrimSpace(syncToken),interval:interval}
 }
 
 func (p *Puller) Run(ctx context.Context) {
@@ -46,9 +49,7 @@ func (p *Puller) Run(ctx context.Context) {
 }
 
 func (p *Puller) pullUntilCaughtUp(ctx context.Context) error {
-    for i:=0;i<10;i++ {
-        more,err:=p.pullOnce(ctx); if err!=nil{return err}; if !more{return nil}
-    }
+    for i:=0;i<10;i++ { more,err:=p.pullOnce(ctx); if err!=nil{return err}; if !more{return nil} }
     return nil
 }
 
@@ -57,7 +58,10 @@ func (p *Puller) pullOnce(ctx context.Context) (bool,error) {
     endpoint:=p.baseURL+"/api/v1/sync/changes?limit=100"
     if cursor!="" { endpoint += "&cursor="+url.QueryEscape(cursor) }
     req,err:=http.NewRequestWithContext(ctx,http.MethodGet,endpoint,nil); if err!=nil{return false,err}
-    req.Header.Set("Accept","application/json"); req.Header.Set("X-POS-Device-ID",p.deviceID)
+    req.Header.Set("Accept","application/json")
+    req.Header.Set("X-POS-Device-ID",p.deviceID)
+    req.Header.Set("X-POS-Tenant-ID",p.tenantID)
+    req.Header.Set("X-POS-Sync-Token",p.syncToken)
     resp,err:=p.client.Do(req); if err!=nil{return false,err}; defer resp.Body.Close()
     body,err:=io.ReadAll(io.LimitReader(resp.Body,4<<20)); if err!=nil{return false,err}
     if resp.StatusCode<200 || resp.StatusCode>=300 { return false,fmt.Errorf("change_feed_http_%d",resp.StatusCode) }
