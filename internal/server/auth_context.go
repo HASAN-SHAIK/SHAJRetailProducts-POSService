@@ -36,41 +36,17 @@ func hasLocalPermission(user LocalUserContext, permission string) bool {
 
 func (s *Server) localAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/health" || r.URL.Path == "/api/v1/ready" {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		// New(...) is intentionally the raw server constructor used by integration
-		// tests. The production entrypoint uses NewSecure(...), whose outer
-		// security.LocalAuth middleware requires X-POS-Local-Token before requests
-		// can reach here. Requests without that header therefore only occur on the
-		// raw test server; inject an internal wildcard identity so existing vertical
-		// slice tests exercise business behavior without duplicating auth setup.
+		if r.URL.Path == "/api/v1/health" || r.URL.Path == "/api/v1/ready" { next.ServeHTTP(w, r); return }
 		if strings.TrimSpace(r.Header.Get("X-POS-Local-Token")) == "" {
 			internal := LocalUserContext{UserID: "internal-test", Role: "admin", TenantID: "internal-test", AllBranchAccess: true, Permissions: []string{"*"}}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authContextKey{}, internal)))
 			return
 		}
-
-		// Machine authentication/origin validation is handled by security.LocalAuth
-		// in NewSecure. These endpoints need machine trust but no cashier session.
-		machineOnly := r.URL.Path == "/api/v1/auth/enroll" ||
-			r.URL.Path == "/api/v1/auth/login" ||
-			r.URL.Path == "/api/v1/device" ||
-			r.URL.Path == "/api/v1/device/registration" ||
-			r.URL.Path == "/api/v1/device/heartbeat"
-		if machineOnly {
-			next.ServeHTTP(w, r)
-			return
-		}
-
+		machineOnly := r.URL.Path == "/api/v1/auth/enroll" || r.URL.Path == "/api/v1/auth/login" || r.URL.Path == "/api/v1/device" || r.URL.Path == "/api/v1/device/registration" || r.URL.Path == "/api/v1/device/heartbeat"
+		if machineOnly { next.ServeHTTP(w, r); return }
 		token := strings.TrimSpace(r.Header.Get("X-POS-Session-Token"))
 		user, err := s.localAuth.Authenticate(r.Context(), token)
-		if err != nil {
-			writeError(w, http.StatusUnauthorized, "local_session_required")
-			return
-		}
+		if err != nil { writeError(w, http.StatusUnauthorized, "local_session_required"); return }
 		ctxUser := LocalUserContext{UserID: user.UserID, Role: user.Role, TenantID: user.TenantID, BranchID: user.BranchID, AllBranchAccess: user.AllBranchAccess, Permissions: user.Permissions}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authContextKey{}, ctxUser)))
 	})
@@ -91,30 +67,26 @@ type enrollInput struct {
 }
 
 func (s *Server) handleLocalAuthEnroll(w http.ResponseWriter, r *http.Request) {
-	if strings.TrimSpace(s.cfg.OfflineGrantSecret) == "" {
-		writeError(w, http.StatusServiceUnavailable, "offline_auth_not_configured")
-		return
-	}
+	if strings.TrimSpace(s.cfg.OfflineGrantSecret) == "" { writeError(w, http.StatusServiceUnavailable, "offline_auth_not_configured"); return }
 	var input enrollInput
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
-	dec.DisallowUnknownFields()
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)); dec.DisallowUnknownFields()
 	if err := dec.Decode(&input); err != nil { writeError(w, http.StatusBadRequest, "invalid_auth_payload"); return }
-	user, err := s.localAuth.Enroll(r.Context(), input.OfflineGrant, input.PIN)
+	identity, err := s.device.Get(r.Context())
+	if err != nil || strings.TrimSpace(identity.DeviceID) == "" || identity.StoreID == nil || strings.TrimSpace(*identity.StoreID) == "" {
+		writeError(w, http.StatusConflict, "device_not_registered_to_store"); return
+	}
+	user, err := s.localAuth.EnrollForDevice(r.Context(), input.OfflineGrant, input.PIN, identity.DeviceID, *identity.StoreID)
 	if errors.Is(err, localauth.ErrInvalidPIN) { writeError(w, http.StatusBadRequest, "invalid_pin"); return }
 	if errors.Is(err, localauth.ErrInvalidGrant) { writeError(w, http.StatusUnauthorized, "invalid_offline_grant"); return }
 	if err != nil { writeError(w, http.StatusInternalServerError, "local_auth_enroll_failed"); return }
 	writeJSON(w, http.StatusOK, map[string]any{"user": user})
 }
 
-type loginInput struct {
-	UserID string `json:"user_id"`
-	PIN    string `json:"pin"`
-}
+type loginInput struct { UserID string `json:"user_id"`; PIN string `json:"pin"` }
 
 func (s *Server) handleLocalAuthLogin(w http.ResponseWriter, r *http.Request) {
 	var input loginInput
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
-	dec.DisallowUnknownFields()
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10)); dec.DisallowUnknownFields()
 	if err := dec.Decode(&input); err != nil { writeError(w, http.StatusBadRequest, "invalid_auth_payload"); return }
 	token, user, err := s.localAuth.Login(r.Context(), input.UserID, input.PIN)
 	if errors.Is(err, localauth.ErrLocked) { writeError(w, http.StatusTooManyRequests, "local_auth_temporarily_locked"); return }
