@@ -56,7 +56,6 @@ func Load() (Config, error) {
 	if cfg.ListenAddress == "" { return Config{}, fmt.Errorf("POS_LISTEN_ADDRESS cannot be empty") }
 	if cfg.DatabasePath == "" { return Config{}, fmt.Errorf("POS_SQLITE_PATH cannot be empty") }
 	if cfg.LocalTokenFile == "" { return Config{}, fmt.Errorf("POS_LOCAL_TOKEN_FILE cannot be empty") }
-	if cfg.OfflineGrantSecret == "" { return Config{}, fmt.Errorf("POS_OFFLINE_GRANT_SECRET cannot be empty") }
 	if cfg.BackupDirectory == "" { return Config{}, fmt.Errorf("POS_BACKUP_DIRECTORY cannot be empty") }
 	if cfg.SyncRequestTimeout <= 0 || cfg.SyncPollInterval <= 0 || cfg.BackupInterval <= 0 || cfg.ObservabilityInterval <= 0 { return Config{}, fmt.Errorf("configured durations must be positive") }
 	if cfg.BackupRetention <= 0 { return Config{}, fmt.Errorf("POS_BACKUP_RETENTION must be positive") }
