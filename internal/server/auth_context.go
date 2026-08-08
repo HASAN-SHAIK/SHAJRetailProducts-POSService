@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -35,22 +34,16 @@ func hasLocalPermission(user LocalUserContext, permission string) bool {
 	return false
 }
 
-func (s *Server) machineTokenValid(r *http.Request) bool {
-	expected := strings.TrimSpace(s.cfg.LocalAPIToken)
-	provided := strings.TrimSpace(r.Header.Get("X-POS-Local-Token"))
-	return expected != "" && provided != "" && len(expected) == len(provided) && subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) == 1
-}
-
 func (s *Server) localAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/health" || r.URL.Path == "/api/v1/ready" {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if !s.machineTokenValid(r) {
-			writeError(w, http.StatusUnauthorized, "local_api_unauthorized")
-			return
-		}
+
+		// Machine authentication/origin validation is intentionally handled by
+		// security.LocalAuth in NewSecure. These routes need machine trust but no
+		// cashier session so a fresh terminal can bootstrap and enroll/login users.
 		machineOnly := r.URL.Path == "/api/v1/auth/enroll" ||
 			r.URL.Path == "/api/v1/auth/login" ||
 			r.URL.Path == "/api/v1/device" ||
@@ -60,6 +53,7 @@ func (s *Server) localAuthMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+
 		token := strings.TrimSpace(r.Header.Get("X-POS-Session-Token"))
 		user, err := s.localAuth.Authenticate(r.Context(), token)
 		if err != nil {
@@ -86,6 +80,10 @@ type enrollInput struct {
 }
 
 func (s *Server) handleLocalAuthEnroll(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimSpace(s.cfg.OfflineGrantSecret) == "" {
+		writeError(w, http.StatusServiceUnavailable, "offline_auth_not_configured")
+		return
+	}
 	var input enrollInput
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	dec.DisallowUnknownFields()
