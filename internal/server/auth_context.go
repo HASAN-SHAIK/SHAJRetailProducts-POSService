@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -48,17 +47,16 @@ func (s *Server) localAuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		permissions := []string{}
-		if raw := strings.TrimSpace(r.Header.Get("X-SHAJ-Permissions")); raw != "" {
-			if err := json.Unmarshal([]byte(raw), &permissions); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid_user_permissions")
-				return
+		for _, raw := range strings.Split(r.Header.Get("X-POS-Permissions"), ",") {
+			if value := strings.TrimSpace(raw); value != "" {
+				permissions = append(permissions, value)
 			}
 		}
 		user := LocalUserContext{
-			UserID:      strings.TrimSpace(r.Header.Get("X-SHAJ-User-ID")),
-			Role:        strings.ToLower(strings.TrimSpace(r.Header.Get("X-SHAJ-User-Role"))),
-			TenantID:    strings.TrimSpace(r.Header.Get("X-SHAJ-Tenant-ID")),
-			BranchID:    strings.TrimSpace(r.Header.Get("X-SHAJ-Branch-ID")),
+			UserID:      strings.TrimSpace(r.Header.Get("X-POS-User-ID")),
+			Role:        strings.ToLower(strings.TrimSpace(r.Header.Get("X-POS-User-Role"))),
+			TenantID:    strings.TrimSpace(r.Header.Get("X-POS-Tenant-ID")),
+			BranchID:    strings.TrimSpace(r.Header.Get("X-POS-Branch-ID")),
 			Permissions: permissions,
 		}
 		if user.UserID == "" || user.TenantID == "" || user.Role == "" {
