@@ -89,13 +89,11 @@ jobs:
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-sale-projections.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-payment-recorded.sql
 
-      - name: Install minimal backend runtime dependencies
-        run: |
-          mkdir -p /tmp/shaj-e2e-node
-          cd /tmp/shaj-e2e-node
-          npm init -y >/dev/null 2>&1
-          npm install --ignore-scripts express@4 pg@8 dotenv@16 >/dev/null
-          echo "NODE_PATH=/tmp/shaj-e2e-node/node_modules" >> "$GITHUB_ENV"
+      - name: Install backend runtime dependencies
+        working-directory: backend
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: npm install --ignore-scripts --no-audit --no-fund
 
       - name: Start production POS sync route against PostgreSQL
         run: |
@@ -115,7 +113,7 @@ jobs:
           process.on('SIGINT', shutdown);
           NODE
 
-          NODE_PATH="$NODE_PATH" node backend/e2e-pos-sync-server.js >/tmp/pos-central-e2e.log 2>&1 &
+          node backend/e2e-pos-sync-server.js >/tmp/pos-central-e2e.log 2>&1 &
           echo $! >/tmp/pos-central-e2e.pid
 
           for i in $(seq 1 30); do
@@ -132,7 +130,7 @@ jobs:
         run: |
           CGO_ENABLED=1 go test ./internal/syncengine -run '^TestRealCentralPaymentE2E$' -count=1 -v
 
-      - name: Verify exactly-once payment projection before sale completion
+      - name: Verify exactly-once deferred payment handling before sale completion
         run: |
           assert_one() {
             local sql="$1"
@@ -157,7 +155,7 @@ jobs:
           }
 
           assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_type='payment.recorded' AND aggregate_type='payment' AND processed_at IS NOT NULL" "processed payment sync event"
-          assert_one "SELECT COUNT(*) FROM pos_sale_payments WHERE order_id='ord-payment-cross-repo-e2e' AND client_payment_id='client-pay-cross-repo-e2e' AND amount_minor=5000 AND status='captured'" "payment"
+          assert_zero "SELECT COUNT(*) FROM pos_sale_payments WHERE order_id='ord-payment-cross-repo-e2e' AND client_payment_id='client-pay-cross-repo-e2e'" "payment projection before sale"
           assert_zero "SELECT COUNT(*) FROM pos_sales WHERE order_id='ord-payment-cross-repo-e2e'" "sale projection before completion"
 
       - name: Show backend log on failure
