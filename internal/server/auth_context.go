@@ -51,7 +51,12 @@ func (s *Server) localAuthMiddleware(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "local_api_unauthorized")
 			return
 		}
-		if r.URL.Path == "/api/v1/auth/enroll" || r.URL.Path == "/api/v1/auth/login" {
+		machineOnly := r.URL.Path == "/api/v1/auth/enroll" ||
+			r.URL.Path == "/api/v1/auth/login" ||
+			r.URL.Path == "/api/v1/device" ||
+			r.URL.Path == "/api/v1/device/registration" ||
+			r.URL.Path == "/api/v1/device/heartbeat"
+		if machineOnly {
 			next.ServeHTTP(w, r)
 			return
 		}
