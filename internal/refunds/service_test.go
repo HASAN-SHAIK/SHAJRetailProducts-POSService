@@ -27,6 +27,9 @@ func seedCompletedSale(t *testing.T, db *database.DB, withBalance bool) {
 	ctx := context.Background()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := db.SQL().ExecContext(ctx, `
+		INSERT INTO catalog_products(id,name,unit_of_measure,is_active,allow_manual_price,track_inventory,version,updated_at)
+		VALUES('product-1','Refund Product','unit',1,0,1,1,?)`, now); err != nil { t.Fatal(err) }
+	if _, err := db.SQL().ExecContext(ctx, `
 		INSERT INTO sales_orders(id,client_order_id,store_id,status,currency,subtotal_minor,discount_minor,tax_minor,total_minor,source,version,completed_at,created_at,updated_at)
 		VALUES('ord-refund-full','client-refund-full','store-1','paid','INR',10000,0,0,10000,'pos',2,?,?,?)`, now, now, now); err != nil { t.Fatal(err) }
 	if _, err := db.SQL().ExecContext(ctx, `
