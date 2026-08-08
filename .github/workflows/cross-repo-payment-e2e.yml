@@ -130,7 +130,7 @@ jobs:
         run: |
           CGO_ENABLED=1 go test ./internal/syncengine -run '^TestRealCentralPaymentE2E$' -count=1 -v
 
-      - name: Verify exactly-once payment projection before sale completion
+      - name: Verify exactly-once deferred payment handling before sale completion
         run: |
           assert_one() {
             local sql="$1"
@@ -155,7 +155,7 @@ jobs:
           }
 
           assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_type='payment.recorded' AND aggregate_type='payment' AND processed_at IS NOT NULL" "processed payment sync event"
-          assert_one "SELECT COUNT(*) FROM pos_sale_payments WHERE order_id='ord-payment-cross-repo-e2e' AND client_payment_id='client-pay-cross-repo-e2e' AND amount_minor=5000 AND status='captured'" "payment"
+          assert_zero "SELECT COUNT(*) FROM pos_sale_payments WHERE order_id='ord-payment-cross-repo-e2e' AND client_payment_id='client-pay-cross-repo-e2e'" "payment projection before sale"
           assert_zero "SELECT COUNT(*) FROM pos_sales WHERE order_id='ord-payment-cross-repo-e2e'" "sale projection before completion"
 
       - name: Show backend log on failure
