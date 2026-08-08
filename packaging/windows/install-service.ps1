@@ -15,8 +15,8 @@ Copy-Item $Binary (Join-Path $InstallDir "shajretail-pos.exe") -Force
 $envFile = Join-Path $DataDir "pos.env"
 if (-not (Test-Path $envFile)) {
 @"
-POS_SERVICE_ADDRESS=127.0.0.1:4782
-POS_DATABASE_PATH=$DataDir\shajretail-pos.db
+POS_LISTEN_ADDRESS=127.0.0.1:4782
+POS_SQLITE_PATH=$DataDir\shajretail-pos.db
 POS_LOCAL_TOKEN_FILE=$DataDir\shajretail-pos.db.token
 POS_BACKUP_DIRECTORY=$DataDir\backups
 "@ | Set-Content -Encoding UTF8 $envFile

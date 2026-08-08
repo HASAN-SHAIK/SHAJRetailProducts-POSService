@@ -77,6 +77,127 @@ func TestOrderVerticalSlicePersistsAcrossSQLiteRestart(t *testing.T) {
 	}
 }
 
+func TestOrderCreateAcceptsCentralNumericCustomerID(t *testing.T) {
+	ctx := context.Background()
+	db := openMigratedDB(t, filepath.Join(t.TempDir(), "pos.db"))
+	defer db.Close()
+	deviceService := device.New(db)
+	if _, err := deviceService.EnsureInstallation(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deviceService.ApplyRegistration(ctx, device.Registration{StoreID: "store-1", TerminalID: "terminal-1"}); err != nil {
+		t.Fatal(err)
+	}
+	seedOrderCatalog(t, db)
+	changes := inbox.New(db)
+	applyCatalogMessage(t, changes, "product-central-665", "catalog.product.upsert", map[string]any{
+		"id": "665", "name": "Central Product", "unit_of_measure": "unit", "is_active": true, "allow_manual_price": false, "track_inventory": true, "version": 1,
+	})
+	applyCatalogMessage(t, changes, "price-central-665", "catalog.price.upsert", map[string]any{
+		"id": "price-central-665", "product_id": "665", "store_id": "store-1", "currency": "INR", "amount_minor": 5500000, "tax_inclusive": true, "priority": 100, "version": 1,
+	})
+	if _, err := db.SQL().ExecContext(ctx, `
+		INSERT INTO customers(id,name,currency,status,created_at,updated_at)
+		VALUES('2','Central Customer','INR','active','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+
+	app := newTestServer(db, deviceService)
+	body := map[string]any{
+		"client_order_id": "client-order-numeric-customer",
+		"customer_id":     2,
+		"currency":        "INR",
+		"items":           []map[string]any{{"product_id": 665, "quantity_milli": 1000, "discount_minor": 0, "tax_minor": 0}},
+	}
+	res := serveJSON(t, app, http.MethodPost, "/api/v1/orders", body)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("create order status=%d body=%s", res.Code, res.Body.String())
+	}
+	var order orders.Order
+	if err := json.NewDecoder(res.Body).Decode(&order); err != nil {
+		t.Fatal(err)
+	}
+	if order.CustomerID == nil || *order.CustomerID != "2" {
+		t.Fatalf("customer_id=%v, want 2", order.CustomerID)
+	}
+}
+
+func TestOrderListAndDetailReadSQLiteOrders(t *testing.T) {
+	ctx := context.Background()
+	db := openMigratedDB(t, filepath.Join(t.TempDir(), "pos.db"))
+	defer db.Close()
+	deviceService := device.New(db)
+	if _, err := deviceService.EnsureInstallation(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deviceService.ApplyRegistration(ctx, device.Registration{StoreID: "store-1", TerminalID: "terminal-1"}); err != nil {
+		t.Fatal(err)
+	}
+	seedOrderCatalog(t, db)
+	app := newTestServer(db, deviceService)
+
+	orderID := postOrder(t, app)
+	postPayment(t, app, orderID, "client-payment-list-1")
+	completeOrder(t, app, orderID)
+
+	listRes := serveJSON(t, app, http.MethodGet, "/api/v1/orders?limit=20&page=1", nil)
+	if listRes.Code != http.StatusOK {
+		t.Fatalf("list orders status=%d body=%s", listRes.Code, listRes.Body.String())
+	}
+	var listPayload struct {
+		Items []orders.Order `json:"items"`
+		Count int            `json:"count"`
+	}
+	if err := json.NewDecoder(listRes.Body).Decode(&listPayload); err != nil {
+		t.Fatal(err)
+	}
+	if listPayload.Count != 1 || len(listPayload.Items) != 1 || listPayload.Items[0].ID != orderID {
+		t.Fatalf("unexpected list payload: %#v", listPayload)
+	}
+	if listPayload.Items[0].TotalMinor != 12500 || len(listPayload.Items[0].Items) != 1 {
+		t.Fatalf("list did not return SQLite order fields/items: %#v", listPayload.Items[0])
+	}
+
+	detailRes := serveJSON(t, app, http.MethodGet, "/api/v1/orders/"+orderID, nil)
+	if detailRes.Code != http.StatusOK {
+		t.Fatalf("detail order status=%d body=%s", detailRes.Code, detailRes.Body.String())
+	}
+	var detail orders.Order
+	if err := json.NewDecoder(detailRes.Body).Decode(&detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.ID != orderID || detail.CompletedAt == nil || len(detail.Items) != 1 {
+		t.Fatalf("unexpected detail payload: %#v", detail)
+	}
+
+	paymentRes := serveJSON(t, app, http.MethodGet, "/api/v1/orders/"+orderID+"/payments", nil)
+	if paymentRes.Code != http.StatusOK {
+		t.Fatalf("payments status=%d body=%s", paymentRes.Code, paymentRes.Body.String())
+	}
+	var paymentPayload struct {
+		Count   int              `json:"count"`
+		Summary payments.Summary `json:"summary"`
+	}
+	if err := json.NewDecoder(paymentRes.Body).Decode(&paymentPayload); err != nil {
+		t.Fatal(err)
+	}
+	if paymentPayload.Count != 1 || paymentPayload.Summary.PaidMinor != 12500 || paymentPayload.Summary.BalanceMinor != 0 {
+		t.Fatalf("unexpected payment payload: %#v", paymentPayload)
+	}
+
+	receiptRes := serveJSON(t, app, http.MethodGet, "/api/v1/orders/"+orderID+"/receipt", nil)
+	if receiptRes.Code != http.StatusOK {
+		t.Fatalf("receipt status=%d body=%s", receiptRes.Code, receiptRes.Body.String())
+	}
+	var receiptPayload receipts.Receipt
+	if err := json.NewDecoder(receiptRes.Body).Decode(&receiptPayload); err != nil {
+		t.Fatal(err)
+	}
+	if receiptPayload.OrderID != orderID || receiptPayload.SnapshotSHA256 == "" || receiptPayload.Snapshot.Order.ID != orderID {
+		t.Fatalf("unexpected receipt payload: %#v", receiptPayload)
+	}
+}
+
 func openMigratedDB(t *testing.T, path string) *database.DB {
 	t.Helper()
 	db, err := database.Open(context.Background(), path)
