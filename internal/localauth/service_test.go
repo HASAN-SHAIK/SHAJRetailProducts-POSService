@@ -2,10 +2,14 @@ package localauth
 
 import (
 	"context"
-	"crypto/hmac"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"path/filepath"
 	"testing"
 	"time"
@@ -20,9 +24,13 @@ func TestEnrollLoginAndAuthenticate(t *testing.T) {
 	defer db.Close()
 	if err := db.Migrate(ctx); err != nil { t.Fatalf("migrate: %v", err) }
 
-	secret := "unit-test-offline-grant-secret"
-	service := New(db, secret)
-	grant := signTestGrant(t, secret, map[string]any{
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil { t.Fatal(err) }
+	publicDER, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	if err != nil { t.Fatal(err) }
+	publicPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER})
+	service := New(db, string(publicPEM))
+	grant := signTestGrant(t, privateKey, map[string]any{
 		"type": "pos_offline_grant",
 		"user_id": "44",
 		"tenant_id": "tenant-1",
@@ -53,14 +61,36 @@ func TestEnrollLoginAndAuthenticate(t *testing.T) {
 	if authenticated.UserID != "44" || len(authenticated.Permissions) != 3 { t.Fatalf("unexpected authenticated user: %+v", authenticated) }
 }
 
-func signTestGrant(t *testing.T, secret string, claims map[string]any) string {
+func TestRejectsGrantSignedByUnknownPrivateKey(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, filepath.Join(t.TempDir(), "pos.db"))
+	if err != nil { t.Fatal(err) }
+	defer db.Close()
+	if err := db.Migrate(ctx); err != nil { t.Fatalf("migrate: %v", err) }
+
+	trusted, _ := rsa.GenerateKey(rand.Reader, 2048)
+	attacker, _ := rsa.GenerateKey(rand.Reader, 2048)
+	publicDER, _ := x509.MarshalPKIXPublicKey(&trusted.PublicKey)
+	service := New(db, string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER})))
+	grant := signTestGrant(t, attacker, map[string]any{
+		"type": "pos_offline_grant", "user_id": "44", "tenant_id": "tenant-1", "role": "staff",
+		"grant_id": "forged", "iss": "shajtech-central", "aud": "shajtech-pos-edge", "exp": time.Now().Add(time.Hour).Unix(),
+	})
+
+	if _, err := service.Enroll(ctx, grant, "2468"); err != ErrInvalidGrant {
+		t.Fatalf("forged grant error = %v, want %v", err, ErrInvalidGrant)
+	}
+}
+
+func signTestGrant(t *testing.T, privateKey *rsa.PrivateKey, claims map[string]any) string {
 	t.Helper()
-	header, _ := json.Marshal(map[string]any{"alg": "HS256", "typ": "JWT"})
+	header, _ := json.Marshal(map[string]any{"alg": "RS256", "typ": "JWT", "kid": "pos-offline-v1"})
 	payload, _ := json.Marshal(claims)
 	h := base64.RawURLEncoding.EncodeToString(header)
 	p := base64.RawURLEncoding.EncodeToString(payload)
 	input := h + "." + p
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = mac.Write([]byte(input))
-	return input + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	digest := sha256.Sum256([]byte(input))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA256, digest[:])
+	if err != nil { t.Fatal(err) }
+	return input + "." + base64.RawURLEncoding.EncodeToString(signature)
 }
