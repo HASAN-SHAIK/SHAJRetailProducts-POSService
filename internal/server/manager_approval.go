@@ -98,7 +98,7 @@ func (s *Server) handleManagerApproval(w http.ResponseWriter, r *http.Request) {
 	_, err = s.db.SQL().ExecContext(r.Context(), `
 		INSERT INTO pos_manager_approvals(token_hash,cashier_user_id,approver_user_id,permission,reason,created_at,expires_at)
 		VALUES(?,?,?,?,?,?,?)`,
-		hash[:], cashier.UserID, manager.UserID, input.Permission, nullableString(input.Reason), now.Format(time.RFC3339Nano), expires.Format(time.RFC3339Nano))
+		hash[:], cashier.UserID, manager.UserID, input.Permission, nullableApprovalString(input.Reason), now.Format(time.RFC3339Nano), expires.Format(time.RFC3339Nano))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "approval_issue_failed")
 		return
@@ -192,11 +192,11 @@ func (s *Server) recordOrderApproval(ctx context.Context, orderID string) error 
 	if !ok { return nil }
 	_, err := s.db.SQL().ExecContext(ctx,
 		`UPDATE sales_orders SET approved_by_user_id=?, approval_reason=? WHERE id=?`,
-		approval.ApproverUserID, nullableString(approval.Reason), orderID)
+		approval.ApproverUserID, nullableApprovalString(approval.Reason), orderID)
 	return err
 }
 
-func nullableString(value string) any {
+func nullableApprovalString(value string) any {
 	value = strings.TrimSpace(value)
 	if value == "" { return nil }
 	return value
