@@ -21,6 +21,8 @@ type Config struct {
 	SyncPollInterval      time.Duration
 	LocalAPIToken         string
 	LocalTokenFile        string
+	// OfflineGrantSecret is retained as an internal field name for compatibility;
+	// it now contains Central's RSA public verification key, never signing material.
 	OfflineGrantSecret    string
 	AllowedOrigins        []string
 	BackupDirectory       string
@@ -48,7 +50,7 @@ func Load() (Config, error) {
 		CentralTenantID: strings.TrimSpace(envAlias("POS_SYNC_TENANT_ID", "POS_CENTRAL_TENANT_ID")), CentralSyncToken: strings.TrimSpace(envAlias("POS_SYNC_TOKEN", "POS_CENTRAL_SYNC_TOKEN")),
 		SyncRequestTimeout: requestTimeout, SyncPollInterval: pollInterval,
 		LocalAPIToken: os.Getenv("POS_LOCAL_API_TOKEN"), LocalTokenFile: envOrDefault("POS_LOCAL_TOKEN_FILE", databasePath+".token"),
-		OfflineGrantSecret: strings.TrimSpace(os.Getenv("POS_OFFLINE_GRANT_SECRET")),
+		OfflineGrantSecret: normalizeMultilineEnv("POS_OFFLINE_GRANT_PUBLIC_KEY"),
 		AllowedOrigins: csvEnv("POS_ALLOWED_ORIGINS", []string{"http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:5173", "http://127.0.0.1:5173"}),
 		BackupDirectory: envOrDefault("POS_BACKUP_DIRECTORY", databasePath+".backups"), BackupInterval: backupInterval, BackupRetention: retention,
 		ObservabilityInterval: observabilityInterval,
@@ -76,6 +78,7 @@ func validateLoopbackAddress(address string) error {
 func envOrDefault(key, fallback string) string { if value := os.Getenv(key); value != "" { return value }; return fallback }
 func envAlias(key, oldKey string) string { if value := os.Getenv(key); value != "" { return value }; if value := os.Getenv(oldKey); value != "" { warnDeprecatedEnv(oldKey, key); return value }; return "" }
 func envOrDefaultAlias(key, oldKey, fallback string) string { if value := envAlias(key, oldKey); value != "" { return value }; return fallback }
+func normalizeMultilineEnv(key string) string { return strings.TrimSpace(strings.ReplaceAll(os.Getenv(key), `\n`, "\n")) }
 func csvEnv(key string, fallback []string) []string { raw := strings.TrimSpace(os.Getenv(key)); if raw == "" { return append([]string(nil), fallback...) }; parts := strings.Split(raw, ","); out := make([]string, 0, len(parts)); for _, part := range parts { if value := strings.TrimRight(strings.TrimSpace(part), "/"); value != "" { out = append(out, value) } }; return out }
 func durationEnv(key string, fallback time.Duration) (time.Duration, error) { raw := os.Getenv(key); if raw == "" { return fallback, nil }; value, err := time.ParseDuration(raw); if err != nil { return 0, fmt.Errorf("%s: %w", key, err) }; return value, nil }
 func durationEnvAlias(key, oldKey string, fallback time.Duration) (time.Duration, error) { if os.Getenv(key) != "" { return durationEnv(key, fallback) }; if os.Getenv(oldKey) != "" { warnDeprecatedEnv(oldKey, key); return durationEnv(oldKey, fallback) }; return fallback, nil }
