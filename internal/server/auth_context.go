@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -21,6 +23,14 @@ type LocalUserContext struct {
 	Permissions     []string `json:"permissions"`
 }
 
+const (
+	permissionPOSSale     = "pos:sale"
+	permissionPOSDiscount = "pos:discount"
+	permissionPOSVoid     = "pos:void"
+	permissionPOSRefund   = "pos:refund"
+	permissionPOSApprove  = "pos:approve"
+)
+
 func localUserFromContext(ctx context.Context) (LocalUserContext, bool) {
 	value, ok := ctx.Value(authContextKey{}).(LocalUserContext)
 	return value, ok
@@ -30,6 +40,13 @@ func hasLocalPermission(user LocalUserContext, permission string) bool {
 	for _, candidate := range user.Permissions {
 		candidate = strings.TrimSpace(candidate)
 		if candidate == "*" || candidate == permission { return true }
+	}
+	return false
+}
+
+func hasAnyLocalPermission(user LocalUserContext, permissions ...string) bool {
+	for _, permission := range permissions {
+		if hasLocalPermission(user, permission) { return true }
 	}
 	return false
 }
@@ -56,9 +73,54 @@ func requirePermission(permission string, next http.HandlerFunc) http.HandlerFun
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := localUserFromContext(r.Context())
 		if !ok { writeError(w, http.StatusUnauthorized, "local_session_required"); return }
+
+		// During migration, older enrolled grants can still contain orders:write.
+		// It remains a fallback for ordinary checkout only; sensitive actions do not
+		// inherit from this legacy permission.
+		if permission == "orders:write" && r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/orders") {
+			if !hasAnyLocalPermission(user, permissionPOSSale, "orders:write") {
+				writeError(w, http.StatusForbidden, "permission_denied")
+				return
+			}
+			if r.URL.Path == "/api/v1/orders" {
+				requiresDiscount, err := orderPayloadHasDiscount(r)
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "invalid_order_payload")
+					return
+				}
+				if requiresDiscount && !hasLocalPermission(user, permissionPOSDiscount) {
+					writeJSON(w, http.StatusForbidden, map[string]any{
+						"error": "manager_approval_required",
+						"required_permission": permissionPOSDiscount,
+					})
+					return
+				}
+			}
+			next(w, r)
+			return
+		}
+
 		if !hasLocalPermission(user, permission) { writeError(w, http.StatusForbidden, "permission_denied"); return }
 		next(w, r)
 	}
+}
+
+func orderPayloadHasDiscount(r *http.Request) (bool, error) {
+	if r.Body == nil { return false, nil }
+	raw, err := io.ReadAll(io.LimitReader(r.Body, (512<<10)+1))
+	if err != nil { return false, err }
+	if len(raw) > 512<<10 { return false, errors.New("order payload too large") }
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	var payload struct {
+		Items []struct {
+			DiscountMinor int64 `json:"discount_minor"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil { return false, err }
+	for _, item := range payload.Items {
+		if item.DiscountMinor > 0 { return true, nil }
+	}
+	return false, nil
 }
 
 type enrollInput struct {
