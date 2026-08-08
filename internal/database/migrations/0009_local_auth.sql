@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS local_users (
     pin_salt BLOB NOT NULL,
     pin_hash BLOB NOT NULL,
     pin_iterations INTEGER NOT NULL,
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until TEXT,
     grant_id TEXT NOT NULL,
     grant_expires_at TEXT NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1,
