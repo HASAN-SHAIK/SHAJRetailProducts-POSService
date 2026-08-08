@@ -94,7 +94,7 @@ jobs:
           mkdir -p /tmp/shaj-e2e-node
           cd /tmp/shaj-e2e-node
           npm init -y >/dev/null 2>&1
-          npm install --ignore-scripts express@4 pg@8 dotenv@16 amqplib@0.10 winston@3 >/dev/null
+          npm install --ignore-scripts express@4 pg@8 dotenv@16 amqplib@0.10 winston@3 prom-client@15 >/dev/null
           echo "NODE_PATH=/tmp/shaj-e2e-node/node_modules" >> "$GITHUB_ENV"
 
       - name: Start production POS sync route against PostgreSQL
