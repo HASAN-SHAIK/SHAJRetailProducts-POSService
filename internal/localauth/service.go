@@ -22,12 +22,15 @@ var (
     ErrInvalidPIN = errors.New("invalid pin")
     ErrUserNotFound = errors.New("local user not found")
     ErrSessionInvalid = errors.New("local session invalid")
+    ErrLocked = errors.New("local user temporarily locked")
 )
 
 const (
     pinIterations = 120000
     pinKeyLen = 32
     defaultSessionTTL = 12 * time.Hour
+    maxFailedAttempts = 5
+    failedAttemptLockout = 5 * time.Minute
 )
 
 type User struct {
@@ -79,8 +82,8 @@ func (s *Service) Enroll(ctx context.Context, grant, pin string) (User, error) {
 
     _, err = s.db.SQL().ExecContext(ctx, `
         INSERT INTO local_users(user_id, tenant_id, role, branch_id, all_branch_access, permissions_json,
-            pin_salt, pin_hash, pin_iterations, grant_id, grant_expires_at, enabled, updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
+            pin_salt, pin_hash, pin_iterations, failed_attempts, locked_until, grant_id, grant_expires_at, enabled, updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(user_id) DO UPDATE SET
             tenant_id=excluded.tenant_id,
             role=excluded.role,
@@ -90,12 +93,14 @@ func (s *Service) Enroll(ctx context.Context, grant, pin string) (User, error) {
             pin_salt=excluded.pin_salt,
             pin_hash=excluded.pin_hash,
             pin_iterations=excluded.pin_iterations,
+            failed_attempts=0,
+            locked_until=NULL,
             grant_id=excluded.grant_id,
             grant_expires_at=excluded.grant_expires_at,
             enabled=1,
             updated_at=excluded.updated_at`,
         claims.UserID, claims.TenantID, claims.Role, nullable(claims.BranchID), boolInt(claims.AllBranchAccess), string(permissionsJSON),
-        salt, hash, pinIterations, claims.GrantID, expires.Format(time.RFC3339Nano), 1, now.Format(time.RFC3339Nano))
+        salt, hash, pinIterations, 0, nil, claims.GrantID, expires.Format(time.RFC3339Nano), 1, now.Format(time.RFC3339Nano))
     if err != nil { return User{}, fmt.Errorf("enroll local user: %w", err) }
     _, _ = s.db.SQL().ExecContext(ctx, `DELETE FROM local_auth_sessions WHERE user_id = ?`, claims.UserID)
     return claims.user(), nil
@@ -106,25 +111,45 @@ func (s *Service) Login(ctx context.Context, userID, pin string) (string, User, 
     if userID == "" || !validPIN(pin) { return "", User{}, ErrInvalidPIN }
 
     var u User
-    var branch sql.NullString
+    var branch, lockedUntil sql.NullString
     var permissionsJSON string
     var salt, expected []byte
-    var iterations int
+    var iterations, failedAttempts int
     var allBranch, enabled int
     var grantExpires string
     err := s.db.SQL().QueryRowContext(ctx, `
         SELECT user_id, tenant_id, role, branch_id, all_branch_access, permissions_json,
-               pin_salt, pin_hash, pin_iterations, grant_id, grant_expires_at, enabled
+               pin_salt, pin_hash, pin_iterations, failed_attempts, locked_until,
+               grant_id, grant_expires_at, enabled
         FROM local_users WHERE user_id = ?`, userID).Scan(
         &u.UserID, &u.TenantID, &u.Role, &branch, &allBranch, &permissionsJSON,
-        &salt, &expected, &iterations, &u.GrantID, &grantExpires, &enabled)
+        &salt, &expected, &iterations, &failedAttempts, &lockedUntil,
+        &u.GrantID, &grantExpires, &enabled)
     if errors.Is(err, sql.ErrNoRows) { return "", User{}, ErrUserNotFound }
     if err != nil { return "", User{}, fmt.Errorf("read local user: %w", err) }
     if enabled != 1 { return "", User{}, ErrUserNotFound }
+
+    now := time.Now().UTC()
+    if lockedUntil.Valid {
+        if until, err := time.Parse(time.RFC3339Nano, lockedUntil.String); err == nil && now.Before(until) {
+            return "", User{}, ErrLocked
+        }
+    }
     expires, err := time.Parse(time.RFC3339Nano, grantExpires)
-    if err != nil || !time.Now().UTC().Before(expires) { return "", User{}, ErrInvalidGrant }
+    if err != nil || !now.Before(expires) { return "", User{}, ErrInvalidGrant }
+
     actual := pbkdf2SHA256([]byte(pin), salt, iterations, len(expected))
-    if !hmac.Equal(actual, expected) { return "", User{}, ErrInvalidPIN }
+    if !hmac.Equal(actual, expected) {
+        failedAttempts++
+        if failedAttempts >= maxFailedAttempts {
+            until := now.Add(failedAttemptLockout).Format(time.RFC3339Nano)
+            _, _ = s.db.SQL().ExecContext(ctx, `UPDATE local_users SET failed_attempts = 0, locked_until = ?, updated_at = ? WHERE user_id = ?`, until, now.Format(time.RFC3339Nano), userID)
+        } else {
+            _, _ = s.db.SQL().ExecContext(ctx, `UPDATE local_users SET failed_attempts = ?, updated_at = ? WHERE user_id = ?`, failedAttempts, now.Format(time.RFC3339Nano), userID)
+        }
+        return "", User{}, ErrInvalidPIN
+    }
+    _, _ = s.db.SQL().ExecContext(ctx, `UPDATE local_users SET failed_attempts = 0, locked_until = NULL, updated_at = ? WHERE user_id = ?`, now.Format(time.RFC3339Nano), userID)
 
     if branch.Valid { u.BranchID = branch.String }
     u.AllBranchAccess = allBranch == 1
@@ -135,7 +160,6 @@ func (s *Service) Login(ctx context.Context, userID, pin string) (string, User, 
     if _, err := rand.Read(raw); err != nil { return "", User{}, fmt.Errorf("generate local session: %w", err) }
     token := base64.RawURLEncoding.EncodeToString(raw)
     tokenHash := sha256.Sum256([]byte(token))
-    now := time.Now().UTC()
     sessionExpires := now.Add(s.sessionTTL)
     if expires.Before(sessionExpires) { sessionExpires = expires }
     _, err = s.db.SQL().ExecContext(ctx, `
