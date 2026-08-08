@@ -66,6 +66,7 @@ func New(cfg config.Config, db *database.DB, deviceService *device.Service, cata
 	mux.HandleFunc("GET /api/v1/orders/{id}", requirePermission("orders:read", s.handleOrderGet))
 	mux.HandleFunc("POST /api/v1/orders/{id}/complete", requirePermission("orders:write", s.handleOrderComplete))
 	mux.HandleFunc("POST /api/v1/orders/{id}/void", s.handleOrderVoid)
+	mux.HandleFunc("POST /api/v1/orders/{id}/refund", s.handleOrderRefund)
 	mux.HandleFunc("GET /api/v1/orders/{id}/payments", requirePermission("orders:read", s.handlePaymentList))
 	mux.HandleFunc("POST /api/v1/orders/{id}/payments", requirePermission("orders:write", s.handlePaymentCreate))
 	mux.HandleFunc("GET /api/v1/orders/{id}/receipt", requirePermission("orders:read", s.handleOrderReceipt))
