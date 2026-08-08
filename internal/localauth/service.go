@@ -2,13 +2,17 @@ package localauth
 
 import (
     "context"
+    "crypto"
     "crypto/hmac"
     "crypto/rand"
+    "crypto/rsa"
     "crypto/sha256"
+    "crypto/x509"
     "database/sql"
     "encoding/base64"
     "encoding/hex"
     "encoding/json"
+    "encoding/pem"
     "errors"
     "fmt"
     "strings"
@@ -60,12 +64,12 @@ type grantClaims struct {
 
 type Service struct {
     db *database.DB
-    grantSecret []byte
+    grantPublicKey []byte
     sessionTTL time.Duration
 }
 
-func New(db *database.DB, grantSecret string) *Service {
-    return &Service{db: db, grantSecret: []byte(strings.TrimSpace(grantSecret)), sessionTTL: defaultSessionTTL}
+func New(db *database.DB, grantPublicKey string) *Service {
+    return &Service{db: db, grantPublicKey: []byte(strings.TrimSpace(grantPublicKey)), sessionTTL: defaultSessionTTL}
 }
 
 func (s *Service) Enroll(ctx context.Context, grant, pin string) (User, error) {
@@ -209,20 +213,36 @@ func (s *Service) Logout(ctx context.Context, token string) {
 }
 
 func (s *Service) verifyGrant(token string) (grantClaims, error) {
-    if len(s.grantSecret) == 0 { return grantClaims{}, ErrInvalidGrant }
+    if len(s.grantPublicKey) == 0 { return grantClaims{}, ErrInvalidGrant }
     parts := strings.Split(token, ".")
     if len(parts) != 3 { return grantClaims{}, ErrInvalidGrant }
-    signingInput := parts[0] + "." + parts[1]
-    signature, err := base64.RawURLEncoding.DecodeString(parts[2])
-    if err != nil { return grantClaims{}, ErrInvalidGrant }
-    mac := hmac.New(sha256.New, s.grantSecret)
-    _, _ = mac.Write([]byte(signingInput))
-    if !hmac.Equal(signature, mac.Sum(nil)) { return grantClaims{}, ErrInvalidGrant }
 
     headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
     if err != nil { return grantClaims{}, ErrInvalidGrant }
     var header map[string]any
-    if json.Unmarshal(headerBytes, &header) != nil || header["alg"] != "HS256" { return grantClaims{}, ErrInvalidGrant }
+    if json.Unmarshal(headerBytes, &header) != nil || header["alg"] != "RS256" { return grantClaims{}, ErrInvalidGrant }
+
+    block, _ := pem.Decode(s.grantPublicKey)
+    if block == nil { return grantClaims{}, ErrInvalidGrant }
+    var publicKey *rsa.PublicKey
+    if parsed, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
+        key, ok := parsed.(*rsa.PublicKey)
+        if !ok { return grantClaims{}, ErrInvalidGrant }
+        publicKey = key
+    } else if key, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil {
+        publicKey = key
+    } else {
+        return grantClaims{}, ErrInvalidGrant
+    }
+
+    signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+    if err != nil { return grantClaims{}, ErrInvalidGrant }
+    signingInput := parts[0] + "." + parts[1]
+    digest := sha256.Sum256([]byte(signingInput))
+    if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, digest[:], signature); err != nil {
+        return grantClaims{}, ErrInvalidGrant
+    }
+
     payload, err := base64.RawURLEncoding.DecodeString(parts[1])
     if err != nil { return grantClaims{}, ErrInvalidGrant }
     var claims grantClaims
