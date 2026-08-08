@@ -117,6 +117,7 @@ func (s *Server) handleLocalAuthLogin(w http.ResponseWriter, r *http.Request) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&input); err != nil { writeError(w, http.StatusBadRequest, "invalid_auth_payload"); return }
 	token, user, err := s.localAuth.Login(r.Context(), input.UserID, input.PIN)
+	if errors.Is(err, localauth.ErrLocked) { writeError(w, http.StatusTooManyRequests, "local_auth_temporarily_locked"); return }
 	if errors.Is(err, localauth.ErrInvalidPIN) || errors.Is(err, localauth.ErrUserNotFound) { writeError(w, http.StatusUnauthorized, "invalid_local_credentials"); return }
 	if errors.Is(err, localauth.ErrInvalidGrant) { writeError(w, http.StatusUnauthorized, "offline_grant_expired"); return }
 	if err != nil { writeError(w, http.StatusInternalServerError, "local_auth_login_failed"); return }
