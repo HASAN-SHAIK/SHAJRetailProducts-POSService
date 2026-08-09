@@ -40,11 +40,11 @@ type SalePartialReturnedPayload struct {
 // receives the last quantities/refund allocation as well as the terminal lifecycle.
 func (s *Service) ApplySalePartialReturnedTx(ctx context.Context, tx *sql.Tx, order orders.Order, returnID string, refundMinor int64, lines []SalePartialReturnedLine, approvedByUserID, reason string) error {
 	eventOrder := order
-	// POS persists the completed local sale as "paid". Central's durable event
-	// contract uses the canonical lifecycle name "completed" for non-terminal
-	// partial returns; do not mutate the local database state just to satisfy that
-	// cross-service vocabulary boundary.
-	if eventOrder.Status == "paid" {
+	// POS payment state may become paid/partially_paid as tender reversals are
+	// applied. Central models the sale lifecycle separately: an item-level return
+	// remains a completed sale until the final remaining quantity is consumed.
+	// Canonicalize only the durable event vocabulary; keep the local DB state intact.
+	if eventOrder.Status != "returned" {
 		eventOrder.Status = "completed"
 	}
 	payload, err := json.Marshal(SalePartialReturnedPayload{
