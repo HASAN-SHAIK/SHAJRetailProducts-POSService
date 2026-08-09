@@ -1,0 +1,170 @@
+name: Cross-repo Refund E2E
+
+on:
+  pull_request:
+    paths:
+      - 'internal/refunds/**'
+      - 'internal/payments/**'
+      - 'internal/inventory/**'
+      - 'internal/outbox/**'
+      - 'internal/syncengine/**'
+      - '.github/workflows/cross-repo-refund-e2e.yml'
+  workflow_dispatch:
+
+jobs:
+  refund-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGPASSWORD: postgres
+      MASTER_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/masterdb
+      TENANT_DATABASE_URL_TEMPLATE: postgres://postgres:postgres@127.0.0.1:5432/{db}
+      DB_SSL: 'false'
+      POS_SYNC_TENANT_ID: tenant-e2e
+      POS_SYNC_TOKEN: sync-secret
+      POS_E2E_CENTRAL_URL: http://127.0.0.1:5001
+      POS_E2E_TENANT_ID: tenant-e2e
+      POS_E2E_SYNC_TOKEN: sync-secret
+      POS_E2E_DEVICE_ID: device-e2e
+
+    steps:
+      - name: Checkout POS Service
+        uses: actions/checkout@v4
+
+      - name: Checkout merged Backend main
+        uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Backend
+          ref: main
+          path: backend
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Create real master and tenant PostgreSQL databases
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE DATABASE masterdb;
+          CREATE DATABASE tenant_e2e;
+          SQL
+
+          psql -h 127.0.0.1 -U postgres -d masterdb -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE tenants (
+            id TEXT PRIMARY KEY,
+            shop_name TEXT,
+            owner_name TEXT,
+            email TEXT,
+            mobile TEXT,
+            plan_type TEXT,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            addons JSONB NOT NULL DEFAULT '{}'::jsonb,
+            gst_mode TEXT,
+            database_name TEXT NOT NULL
+          );
+          INSERT INTO tenants(id, shop_name, owner_name, email, mobile, plan_type, is_active, addons, gst_mode, database_name)
+          VALUES('tenant-e2e', 'E2E Shop', 'E2E Owner', 'e2e@example.test', '0000000000', 'pro', TRUE, '{}'::jsonb, 'INCLUSIVE', 'tenant_e2e');
+          SQL
+
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-sync-events.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-sale-projections.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-payment-recorded.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-inventory-movement-recorded.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-09-pos-sale-returned.sql
+
+      - name: Install backend runtime dependencies
+        working-directory: backend
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Start production POS sync route against PostgreSQL
+        run: |
+          cat > backend/e2e-pos-sync-server.js <<'NODE'
+          const express = require('express');
+          const router = require('./src/api/v1/modules/sync/posSync.routes');
+          const app = express();
+          app.use(express.json({ limit: '5mb' }));
+          app.use('/api/v1/sync', router);
+          app.use((error, req, res, next) => {
+            console.error(error);
+            res.status(500).json({ code: error.code || 'E2E_SERVER_ERROR', message: error.message });
+          });
+          const server = app.listen(5001, '127.0.0.1', () => console.log('POS sync E2E server listening on 5001'));
+          const shutdown = () => server.close(() => process.exit(0));
+          process.on('SIGTERM', shutdown);
+          process.on('SIGINT', shutdown);
+          NODE
+
+          node backend/e2e-pos-sync-server.js >/tmp/pos-central-e2e.log 2>&1 &
+          echo $! >/tmp/pos-central-e2e.pid
+
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:5001/api/v1/sync/events || true)
+            if [ "$code" = "401" ]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/pos-central-e2e.log
+          exit 1
+
+      - name: Complete sale, refund atomically, sync all compensation facts and replay return
+        run: |
+          CGO_ENABLED=1 go test ./internal/syncengine -run '^TestRealCentralRefundE2E$' -count=1 -v
+
+      - name: Verify local-to-central refund convergence and exactly-once replay
+        run: |
+          assert_one() {
+            local sql="$1"
+            local label="$2"
+            local count
+            count=$(psql -h 127.0.0.1 -U postgres -d tenant_e2e -At -v ON_ERROR_STOP=1 -c "$sql")
+            if [ "$count" != "1" ]; then
+              echo "$label expected exactly 1 row, got $count"
+              exit 1
+            fi
+          }
+
+          assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_type='sale.completed' AND aggregate_id='ord-refund-cross-repo-e2e' AND processed_at IS NOT NULL" "sale.completed event"
+          assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_type='sale.returned' AND aggregate_id='ord-refund-cross-repo-e2e' AND processed_at IS NOT NULL" "sale.returned event"
+          assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_type='payment.recorded' AND processed_at IS NOT NULL AND payload_json->'payment'->>'order_id'='ord-refund-cross-repo-e2e' AND payload_json->'payment'->>'direction'='out'" "refund payment event"
+          assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_type='inventory.movement.recorded' AND processed_at IS NOT NULL AND payload_json->'movement'->>'reference_id'='ord-refund-cross-repo-e2e' AND payload_json->'movement'->>'movement_type'='sale_return'" "sale return inventory event"
+
+          assert_one "SELECT COUNT(*) FROM orders WHERE source_channel='pos' AND source_order_id='ord-refund-cross-repo-e2e' AND order_status='returned' AND total_paid=0 AND source_version=3 AND source_refund_approved_by_user_id='manager-refund-e2e' AND source_refund_reason='customer returned full sale'" "canonical returned order with manager audit"
+          assert_one "SELECT COUNT(*) FROM pos_sales WHERE order_id='ord-refund-cross-repo-e2e' AND status='returned' AND version=3" "compatibility returned sale"
+          assert_one "SELECT COUNT(*) FROM pos_sale_payments WHERE order_id='ord-refund-cross-repo-e2e' AND direction='out' AND status='refunded' AND amount_minor=10000" "central payment reversal"
+          assert_one "SELECT COUNT(*) FROM pos_inventory_movements WHERE order_id='ord-refund-cross-repo-e2e' AND movement_type='sale_return' AND quantity_delta_milli=1000" "central inventory restoration"
+
+      - name: Show backend log on failure
+        if: failure()
+        run: cat /tmp/pos-central-e2e.log || true
+
+      - name: Stop E2E backend
+        if: always()
+        run: |
+          if [ -f /tmp/pos-central-e2e.pid ]; then
+            kill "$(cat /tmp/pos-central-e2e.pid)" || true
+          fi
