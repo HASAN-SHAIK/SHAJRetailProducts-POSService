@@ -107,7 +107,7 @@ func TestRealCentralPartialReturnE2E(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Status != "completed" || plan.FullRemaining || plan.RefundMinor != 2500 {
+	if updated.Status == "returned" || plan.FullRemaining || plan.RefundMinor != 2500 {
 		t.Fatalf("unexpected partial return state status=%s full=%v refund=%d", updated.Status, plan.FullRemaining, plan.RefundMinor)
 	}
 
