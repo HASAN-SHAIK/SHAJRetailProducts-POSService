@@ -72,7 +72,7 @@ func TestRealCentralRefundE2E(t *testing.T) {
 	refundService := refunds.New(db, orders.New(db, nil), paymentService, inventory.New(db))
 	returned, err := refundService.RefundFullSale(ctx, orderID, managerID, reason)
 	if err != nil { t.Fatal(err) }
-	if returned.Status != "returned" || returned.Version != 3 { t.Fatalf("returned order status/version=%s/%d", returned.Status, returned.Version) }
+	if returned.Status != "returned" || returned.Version != 4 { t.Fatalf("returned order status/version=%s/%d", returned.Status, returned.Version) }
 
 	var outbound, saleReturns int
 	var onHand int64
