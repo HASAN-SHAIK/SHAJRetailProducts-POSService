@@ -78,6 +78,48 @@ func TestGetReconciliationSnapshotIncludesDurablePartialReturnTotals(t *testing.
 	}
 }
 
+func TestGetReconciliationSnapshotIncludesRefundSyncState(t *testing.T) {
+	ctx := context.Background()
+	db := openRefundDB(t)
+	seedCompletedSale(t, db, true)
+	svc, _ := newRefundService(db)
+
+	for _, event := range []struct {
+		id      string
+		version int
+		status  string
+	}{
+		{id: "evt-reconciliation-published", version: 3, status: "published"},
+		{id: "evt-reconciliation-pending", version: 4, status: "pending"},
+		{id: "evt-reconciliation-dead", version: 5, status: "dead_letter"},
+	} {
+		if _, err := db.SQL().ExecContext(ctx, `
+			INSERT INTO outbox_events(
+				id,aggregate_type,aggregate_id,aggregate_version,event_type,schema_version,ordering_key,
+				payload_json,metadata_json,status,attempt_count,available_at,created_at
+			) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			event.id, "sales_order", "ord-refund-full", event.version, "sale.partial_returned", 1, "sales_order:ord-refund-full",
+			"{}", "{}", event.status, 0, "2026-08-09T10:00:00Z", "2026-08-09T10:00:00Z"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.SQL().ExecContext(ctx, `
+		INSERT INTO outbox_events(
+			id,aggregate_type,aggregate_id,aggregate_version,event_type,schema_version,ordering_key,
+			payload_json,metadata_json,status,attempt_count,available_at,created_at
+		) VALUES('evt-other-order','sales_order','ord-other',1,'sale.completed',1,'sales_order:ord-other','{}','{}','dead_letter',0,'2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := svc.GetReconciliationSnapshot(ctx, "ord-refund-full")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.UnpublishedSyncFacts != 2 || snapshot.DeadLetterSyncFacts != 1 {
+		t.Fatalf("sync facts=%+v", snapshot)
+	}
+}
+
 func TestGetReconciliationSnapshotRejectsInvalidOrMissingOrder(t *testing.T) {
 	ctx := context.Background()
 	db := openRefundDB(t)
