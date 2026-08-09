@@ -11,15 +11,32 @@ import (
 const maxAttempts = 12
 
 // ClaimNext atomically reserves one due event for a dispatcher instance.
+// Events sharing an ordering key are strictly serialized: a later event cannot
+// overtake an earlier unpublished event while it is pending, failed/backing off,
+// processing, or dead-lettered. Different ordering keys remain independently
+// dispatchable so one blocked sale does not stall the entire POS outbox.
 func (s *Service) ClaimNext(ctx context.Context, owner string) (*Event, error) {
     var claimed *Event
     err := s.db.WithTx(ctx, func(tx *sql.Tx) error {
         now := time.Now().UTC().Format(time.RFC3339Nano)
         var id string
         err := tx.QueryRowContext(ctx, `
-            SELECT id FROM outbox_events
-            WHERE status IN ('pending','failed') AND available_at <= ?
-            ORDER BY created_at,id LIMIT 1`, now).Scan(&id)
+            SELECT candidate.id
+            FROM outbox_events candidate
+            WHERE candidate.status IN ('pending','failed')
+              AND candidate.available_at <= ?
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM outbox_events earlier
+                  WHERE earlier.ordering_key = candidate.ordering_key
+                    AND earlier.status <> 'published'
+                    AND (
+                        earlier.created_at < candidate.created_at
+                        OR (earlier.created_at = candidate.created_at AND earlier.id < candidate.id)
+                    )
+              )
+            ORDER BY candidate.created_at,candidate.id
+            LIMIT 1`, now).Scan(&id)
         if err == sql.ErrNoRows { return nil }
         if err != nil { return err }
 
