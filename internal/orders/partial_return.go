@@ -36,7 +36,11 @@ func (s *Service) ApplyPartialReturnStateTx(ctx context.Context, tx *sql.Tx, ord
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	order.Status = status
+	// Payment recording may leave a completed sale carrying a payment-derived
+	// status such as partially_paid. Partial returns are lifecycle operations:
+	// while completed_at is present, an intermediate return must remain completed
+	// and only the operation consuming the full remainder advances to returned.
+	order.Status = "completed"
 	if fullRemaining {
 		order.Status = "returned"
 	}
