@@ -45,17 +45,27 @@ func TestOrderReturnHistoryReturnsDurableAuditFacts(t *testing.T) {
 	var body struct {
 		Count int `json:"count"`
 		Items []struct {
-			ID               string `json:"ID"`
-			ApprovedByUserID string `json:"ApprovedByUserID"`
-			Reason           string `json:"Reason"`
-			RefundMinor      int64  `json:"RefundMinor"`
+			ReturnID         string `json:"return_id"`
+			OrderID          string `json:"order_id"`
+			ApprovedByUserID string `json:"approved_by_user_id"`
+			Reason           string `json:"reason"`
+			RefundMinor      int64  `json:"refund_minor"`
+			CreatedAt        string `json:"created_at"`
+			Lines []struct {
+				OrderItemID   string `json:"order_item_id"`
+				QuantityMilli int64  `json:"quantity_milli"`
+				RefundMinor   int64  `json:"refund_minor"`
+			} `json:"lines"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Count != 1 || len(body.Items) != 1 || body.Items[0].ID != "ret-1" || body.Items[0].ApprovedByUserID != "manager-1" || body.Items[0].Reason != "damaged item" || body.Items[0].RefundMinor != 2500 {
+	if body.Count != 1 || len(body.Items) != 1 || body.Items[0].ReturnID != "ret-1" || body.Items[0].OrderID != "ord-1" || body.Items[0].ApprovedByUserID != "manager-1" || body.Items[0].Reason != "damaged item" || body.Items[0].RefundMinor != 2500 || body.Items[0].CreatedAt != "2026-08-09T10:00:00Z" {
 		t.Fatalf("body=%+v", body)
+	}
+	if len(body.Items[0].Lines) != 1 || body.Items[0].Lines[0].OrderItemID != "item-1" || body.Items[0].Lines[0].QuantityMilli != 250 || body.Items[0].Lines[0].RefundMinor != 2500 {
+		t.Fatalf("lines=%+v", body.Items[0].Lines)
 	}
 }
 
