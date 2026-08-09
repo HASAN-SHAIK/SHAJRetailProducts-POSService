@@ -89,13 +89,11 @@ jobs:
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-sale-projections.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-receipt-issued.sql
 
-      - name: Install minimal backend runtime dependencies
-        run: |
-          mkdir -p /tmp/shaj-e2e-node
-          cd /tmp/shaj-e2e-node
-          npm init -y >/dev/null 2>&1
-          npm install --ignore-scripts express@4 pg@8 dotenv@16 >/dev/null
-          echo "NODE_PATH=/tmp/shaj-e2e-node/node_modules" >> "$GITHUB_ENV"
+      - name: Install backend runtime dependencies
+        working-directory: backend
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: npm install --ignore-scripts --no-audit --no-fund
 
       - name: Start production POS sync route against PostgreSQL
         run: |
@@ -115,24 +113,21 @@ jobs:
           process.on('SIGINT', shutdown);
           NODE
 
-          NODE_PATH="$NODE_PATH" node backend/e2e-pos-sync-server.js >/tmp/pos-central-e2e.log 2>&1 &
+          node backend/e2e-pos-sync-server.js >/tmp/pos-central-e2e.log 2>&1 &
           echo $! >/tmp/pos-central-e2e.pid
 
           for i in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:5001/api/v1/sync/events || true)
-            if [ "$code" = "401" ]; then
-              exit 0
-            fi
+            if [ "$code" = "401" ]; then exit 0; fi
             sleep 1
           done
           cat /tmp/pos-central-e2e.log
           exit 1
 
       - name: Create immutable receipt locally, dispatch independently, and replay
-        run: |
-          CGO_ENABLED=1 go test ./internal/syncengine -run '^TestRealCentralReceiptE2E$' -count=1 -v
+        run: CGO_ENABLED=1 go test ./internal/syncengine -run '^TestRealCentralReceiptE2E$' -count=1 -v
 
-      - name: Verify exactly-once immutable receipt projection before sale projection
+      - name: Verify exactly-once receipt acceptance without orphan projection
         run: |
           assert_one() {
             local sql="$1"
@@ -157,7 +152,7 @@ jobs:
           }
 
           assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_type='receipt.issued' AND aggregate_type='receipt' AND processed_at IS NOT NULL" "processed receipt sync event"
-          assert_one "SELECT COUNT(*) FROM pos_sale_receipts r JOIN pos_sync_events e ON e.event_type='receipt.issued' AND e.aggregate_id=r.receipt_id WHERE r.order_id='ord-receipt-cross-repo-e2e' AND r.receipt_number=e.payload_json->'receipt'->>'receipt_number' AND r.snapshot_sha256=e.payload_json->'receipt'->>'snapshot_sha256' AND r.snapshot_json=e.payload_json->'receipt'->'snapshot'" "immutable receipt projection"
+          assert_zero "SELECT COUNT(*) FROM pos_sale_receipts WHERE order_id='ord-receipt-cross-repo-e2e'" "orphan receipt projection before sale sync"
           assert_zero "SELECT COUNT(*) FROM pos_sales WHERE order_id='ord-receipt-cross-repo-e2e'" "sale projection before receipt sync"
 
       - name: Show backend log on failure
@@ -167,6 +162,4 @@ jobs:
       - name: Stop E2E backend
         if: always()
         run: |
-          if [ -f /tmp/pos-central-e2e.pid ]; then
-            kill "$(cat /tmp/pos-central-e2e.pid)" || true
-          fi
+          if [ -f /tmp/pos-central-e2e.pid ]; then kill "$(cat /tmp/pos-central-e2e.pid)" || true; fi

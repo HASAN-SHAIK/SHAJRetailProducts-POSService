@@ -1,14 +1,18 @@
-name: Cross-repo Order E2E
+name: Cross-repo Refund E2E
 
 on:
   pull_request:
     paths:
+      - 'internal/refunds/**'
+      - 'internal/payments/**'
+      - 'internal/inventory/**'
+      - 'internal/outbox/**'
       - 'internal/syncengine/**'
-      - '.github/workflows/cross-repo-order-e2e.yml'
+      - '.github/workflows/cross-repo-refund-e2e.yml'
   workflow_dispatch:
 
 jobs:
-  order-e2e:
+  refund-e2e:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -111,8 +115,11 @@ jobs:
 
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-sync-events.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-sale-projections.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-payment-recorded.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-inventory-movement-recorded.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-08-canonical-pos-orders.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-08-pos-cashier-audit.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-09-pos-sale-returned.sql
 
       - name: Install backend runtime dependencies
         working-directory: backend
@@ -149,10 +156,10 @@ jobs:
           cat /tmp/pos-central-e2e.log
           exit 1
 
-      - name: Dispatch SQLite outbox to real central API and replay
-        run: CGO_ENABLED=1 go test ./internal/syncengine -run '^TestRealCentralOrderE2E$' -count=1 -v
+      - name: Complete sale, refund atomically, sync all compensation facts and replay return
+        run: CGO_ENABLED=1 go test ./internal/syncengine -run '^TestRealCentralRefundE2E$' -count=1 -v
 
-      - name: Verify exactly-once PostgreSQL projections
+      - name: Verify local-to-central refund convergence and exactly-once replay
         run: |
           assert_one() {
             local sql="$1"
@@ -165,13 +172,14 @@ jobs:
             fi
           }
 
-          assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_id='evt-cross-repo-order-e2e' AND processed_at IS NOT NULL" "processed sync event"
-          assert_one "SELECT COUNT(*) FROM pos_sales WHERE order_id='ord-cross-repo-e2e' AND source_event_id='evt-cross-repo-order-e2e'" "sale"
-          assert_one "SELECT COUNT(*) FROM pos_sale_items WHERE order_id='ord-cross-repo-e2e' AND item_id='itm-cross-repo-e2e'" "sale item"
-          assert_one "SELECT COUNT(*) FROM pos_sale_payments WHERE order_id='ord-cross-repo-e2e' AND payment_id='pay-cross-repo-e2e'" "payment"
-          assert_one "SELECT COUNT(*) FROM pos_sale_receipts WHERE order_id='ord-cross-repo-e2e' AND receipt_id='rcpt-cross-repo-e2e'" "receipt"
-          assert_one "SELECT COUNT(*) FROM pos_inventory_movements WHERE order_id='ord-cross-repo-e2e' AND movement_id='mov-cross-repo-e2e'" "inventory movement"
-          assert_one "SELECT COUNT(*) FROM orders WHERE source_channel='pos' AND source_order_id='ord-cross-repo-e2e'" "canonical order"
+          assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_type='sale.completed' AND aggregate_id='ord-refund-cross-repo-e2e' AND processed_at IS NOT NULL" "sale.completed event"
+          assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_type='sale.returned' AND aggregate_id='ord-refund-cross-repo-e2e' AND processed_at IS NOT NULL" "sale.returned event"
+          assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_type='payment.recorded' AND processed_at IS NOT NULL AND payload_json->'payment'->>'order_id'='ord-refund-cross-repo-e2e' AND payload_json->'payment'->>'direction'='out'" "refund payment event"
+          assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_type='inventory.movement.recorded' AND processed_at IS NOT NULL AND payload_json->'movement'->>'reference_id'='ord-refund-cross-repo-e2e' AND payload_json->'movement'->>'movement_type'='sale_return'" "sale return inventory event"
+          assert_one "SELECT COUNT(*) FROM orders WHERE source_channel='pos' AND source_order_id='ord-refund-cross-repo-e2e' AND order_status='returned' AND total_paid=0 AND source_version=4 AND source_refund_approved_by_user_id='manager-refund-e2e' AND source_refund_reason='customer returned full sale'" "canonical returned order with manager audit"
+          assert_one "SELECT COUNT(*) FROM pos_sales WHERE order_id='ord-refund-cross-repo-e2e' AND status='returned' AND version=4" "compatibility returned sale"
+          assert_one "SELECT COUNT(*) FROM pos_sale_payments WHERE order_id='ord-refund-cross-repo-e2e' AND direction='out' AND status='refunded' AND amount_minor=10000" "central payment reversal"
+          assert_one "SELECT COUNT(*) FROM pos_inventory_movements WHERE order_id='ord-refund-cross-repo-e2e' AND movement_type='sale_return' AND quantity_delta_milli=1000" "central inventory restoration"
 
       - name: Show backend log on failure
         if: failure()
