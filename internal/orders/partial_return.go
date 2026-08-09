@@ -21,7 +21,7 @@ func (s *Service) ApplyPartialReturnStateTx(ctx context.Context, tx *sql.Tx, ord
 
 	var status string
 	var completedAt sql.NullString
-	var version int64
+	var version int
 	if err := tx.QueryRowContext(ctx, `SELECT status,completed_at,version FROM sales_orders WHERE id=?`, order.ID).Scan(&status, &completedAt, &version); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Order{}, ErrNotFound
