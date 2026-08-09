@@ -36,7 +36,10 @@ func (s *Service) ApplyPartialReturnStateTx(ctx context.Context, tx *sql.Tx, ord
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	order.Status = status
+	// Payment bookkeeping may leave a completed sale with a transient paid-state
+	// label such as partially_paid. Item-level returns must preserve the sale
+	// lifecycle as completed until the durable return history consumes every item.
+	order.Status = "completed"
 	if fullRemaining {
 		order.Status = "returned"
 	}
