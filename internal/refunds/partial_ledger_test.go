@@ -2,10 +2,9 @@ package refunds
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
-
-	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
 )
 
 func TestPartialReturnLedgerPersistsHistoryAndReplaysIdempotently(t *testing.T) {
@@ -105,5 +104,3 @@ func TestPartialReturnLedgerRejectsRefundTotalMismatch(t *testing.T) {
 		return nil
 	}); err != nil { t.Fatal(err) }
 }
-
-var _ *database.DB
