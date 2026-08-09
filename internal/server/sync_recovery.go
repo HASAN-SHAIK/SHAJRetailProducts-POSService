@@ -16,8 +16,8 @@ type syncRecoveryInput struct {
 
 // handleSyncRecovery requeues only the exact dead-letter head authorized by a
 // Central-signed recovery grant. Central owns authorization; POS only verifies
-// the grant against its local tenant/device/order scope and performs the
-// minimum exact-event state transition.
+// the grant against its local tenant/device/order scope, durably consumes that
+// authorization once, and performs the minimum exact-event state transition.
 func (s *Server) handleSyncRecovery(w http.ResponseWriter, r *http.Request) {
 	var input syncRecoveryInput
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
@@ -44,11 +44,21 @@ func (s *Server) handleSyncRecovery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := outbox.New(s.db).RequeueDeadLetter(r.Context(), grant.EventID, grant.OrderingKey); err != nil {
+	err = outbox.New(s.db).ApplyAuthorizedRecovery(r.Context(), outbox.RecoveryAuthorization{
+		RecoveryID: grant.RecoveryID,
+		EventID: grant.EventID,
+		OrderingKey: grant.OrderingKey,
+		OrderID: grant.OrderID,
+		ApprovedByUserID: grant.ApprovedByUserID,
+		Reason: grant.Reason,
+	})
+	if err != nil {
 		switch {
+		case errors.Is(err, outbox.ErrRecoveryAlreadyConsumed):
+			writeError(w, http.StatusConflict, "sync_recovery_grant_consumed")
 		case errors.Is(err, outbox.ErrDeadLetterNotFound):
 			writeError(w, http.StatusConflict, "sync_recovery_not_available")
-		case errors.Is(err, outbox.ErrRecoveryOrderingMismatch):
+		case errors.Is(err, outbox.ErrRecoveryOrderingMismatch), errors.Is(err, outbox.ErrInvalidRecoveryAuthorization):
 			writeError(w, http.StatusForbidden, "sync_recovery_scope_mismatch")
 		default:
 			writeError(w, http.StatusInternalServerError, "sync_recovery_failed")
