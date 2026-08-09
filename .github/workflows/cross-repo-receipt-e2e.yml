@@ -127,7 +127,7 @@ jobs:
       - name: Create immutable receipt locally, dispatch independently, and replay
         run: CGO_ENABLED=1 go test ./internal/syncengine -run '^TestRealCentralReceiptE2E$' -count=1 -v
 
-      - name: Verify exactly-once immutable receipt projection before sale projection
+      - name: Verify exactly-once receipt acceptance without orphan projection
         run: |
           assert_one() {
             local sql="$1"
@@ -152,7 +152,7 @@ jobs:
           }
 
           assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_type='receipt.issued' AND aggregate_type='receipt' AND processed_at IS NOT NULL" "processed receipt sync event"
-          assert_one "SELECT COUNT(*) FROM pos_sale_receipts r JOIN pos_sync_events e ON e.event_type='receipt.issued' AND e.aggregate_id=r.receipt_id WHERE r.order_id='ord-receipt-cross-repo-e2e' AND r.receipt_number=e.payload_json->'receipt'->>'receipt_number' AND r.snapshot_sha256=e.payload_json->'receipt'->>'snapshot_sha256' AND r.snapshot_json=e.payload_json->'receipt'->'snapshot'" "immutable receipt projection"
+          assert_zero "SELECT COUNT(*) FROM pos_sale_receipts WHERE order_id='ord-receipt-cross-repo-e2e'" "orphan receipt projection before sale sync"
           assert_zero "SELECT COUNT(*) FROM pos_sales WHERE order_id='ord-receipt-cross-repo-e2e'" "sale projection before receipt sync"
 
       - name: Show backend log on failure
