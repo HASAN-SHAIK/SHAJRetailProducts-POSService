@@ -26,6 +26,32 @@ func TestRefundRequiresManagerApprovalForCashier(t *testing.T) {
 	}
 }
 
+func TestPartialRefundRequiresManagerApprovalForCashier(t *testing.T) {
+	s := &Server{}
+	cashier := LocalUserContext{UserID: "cashier-1", Permissions: []string{permissionPOSSale}}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders/ord-1/refund", strings.NewReader(`{"return_id":"ret-1","lines":[{"order_item_id":"item-1","quantity_milli":250}]}`))
+	req = req.WithContext(context.WithValue(req.Context(), authContextKey{}, cashier))
+	res := httptest.NewRecorder()
+
+	s.handleOrderRefund(res, req)
+	if res.Code != http.StatusForbidden || !strings.Contains(res.Body.String(), "manager_approval_required") || !strings.Contains(res.Body.String(), permissionPOSRefund) {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestPartialRefundValidatesOperationIdentityBeforeApproval(t *testing.T) {
+	s := &Server{}
+	cashier := LocalUserContext{UserID: "cashier-1", Permissions: []string{permissionPOSSale}}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders/ord-1/refund", strings.NewReader(`{"lines":[{"order_item_id":"item-1","quantity_milli":250}]}`))
+	req = req.WithContext(context.WithValue(req.Context(), authContextKey{}, cashier))
+	res := httptest.NewRecorder()
+
+	s.handleOrderRefund(res, req)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "invalid_partial_refund") {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
 func TestRefundRejectsApprovalForDifferentSensitivePermission(t *testing.T) {
 	ctx := context.Background()
 	db, err := database.Open(ctx, filepath.Join(t.TempDir(), "pos.db"))
@@ -63,6 +89,19 @@ func TestDirectRefundPermissionStillRequiresReason(t *testing.T) {
 	s := &Server{}
 	manager := LocalUserContext{UserID: "manager-1", Permissions: []string{permissionPOSRefund, permissionPOSApprove}}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders/ord-1/refund", strings.NewReader(`{"reason":""}`))
+	req = req.WithContext(context.WithValue(req.Context(), authContextKey{}, manager))
+	res := httptest.NewRecorder()
+
+	s.handleOrderRefund(res, req)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "refund_reason_required") {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+}
+
+func TestDirectPartialRefundPermissionStillRequiresReason(t *testing.T) {
+	s := &Server{}
+	manager := LocalUserContext{UserID: "manager-1", Permissions: []string{permissionPOSRefund, permissionPOSApprove}}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/orders/ord-1/refund", strings.NewReader(`{"return_id":"ret-1","reason":"","lines":[{"order_item_id":"item-1","quantity_milli":250}]}`))
 	req = req.WithContext(context.WithValue(req.Context(), authContextKey{}, manager))
 	res := httptest.NewRecorder()
 
