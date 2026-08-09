@@ -2,6 +2,7 @@ package refunds
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -68,6 +69,18 @@ func TestRefundFullSaleCommitsMoneyInventoryStateAuditAndEventTogether(t *testin
 	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM inventory_movements WHERE order_item_id='item-refund-full' AND movement_type='sale_return'`).Scan(&returns); err != nil { t.Fatal(err) }
 	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox_events WHERE aggregate_id='ord-refund-full' AND event_type='sale.returned'`).Scan(&returnedEvents); err != nil { t.Fatal(err) }
 	if outbound != 1 || returns != 1 || returnedEvents != 1 { t.Fatalf("outbound=%d returns=%d sale.returned=%d", outbound, returns, returnedEvents) }
+
+	var payloadRaw string
+	if err := db.SQL().QueryRowContext(ctx, `SELECT payload_json FROM outbox_events WHERE aggregate_id='ord-refund-full' AND event_type='sale.returned'`).Scan(&payloadRaw); err != nil { t.Fatal(err) }
+	var payload struct {
+		ApprovedByUserID string `json:"approved_by_user_id"`
+		ApprovalReason string `json:"approval_reason"`
+	}
+	if err := json.Unmarshal([]byte(payloadRaw), &payload); err != nil { t.Fatal(err) }
+	if payload.ApprovedByUserID != "manager-1" || payload.ApprovalReason != "customer returned goods" {
+		t.Fatalf("event audit mismatch %+v", payload)
+	}
+
 	var onHand int64
 	if err := db.SQL().QueryRowContext(ctx, `SELECT on_hand_milli FROM inventory_balances WHERE store_id='store-1' AND product_id='product-1'`).Scan(&onHand); err != nil { t.Fatal(err) }
 	if onHand != 5000 { t.Fatalf("on_hand=%d want=5000", onHand) }
