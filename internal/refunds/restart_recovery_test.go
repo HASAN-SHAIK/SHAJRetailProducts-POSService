@@ -61,7 +61,7 @@ func TestPartialRefundFactsSurvivePOSRestartAndReplay(t *testing.T) {
 	var pendingBefore int
 	if err := db.SQL().QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM outbox_events
-		WHERE status='pending' AND aggregate_id='ord-refund-full'
+		WHERE status='pending' AND ordering_key='sales_order:ord-refund-full'
 		  AND event_type IN ('sale.partial_returned','payment.recorded','inventory.movement.recorded')`).Scan(&pendingBefore); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestPartialRefundFactsSurvivePOSRestartAndReplay(t *testing.T) {
 	var pendingAfter int
 	if err := db.SQL().QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM outbox_events
-		WHERE status='pending' AND aggregate_id='ord-refund-full'
+		WHERE status='pending' AND ordering_key='sales_order:ord-refund-full'
 		  AND event_type IN ('sale.partial_returned','payment.recorded','inventory.movement.recorded')`).Scan(&pendingAfter); err != nil {
 		t.Fatal(err)
 	}
