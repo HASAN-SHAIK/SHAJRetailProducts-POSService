@@ -11,19 +11,27 @@ import (
 )
 
 type SaleReturnedPayload struct {
-	Order     orders.Order    `json:"order"`
-	Inventory json.RawMessage `json:"inventory_movements"`
-	Payments  json.RawMessage `json:"payments"`
+	Order            orders.Order    `json:"order"`
+	Inventory        json.RawMessage `json:"inventory_movements"`
+	Payments         json.RawMessage `json:"payments"`
+	ApprovedByUserID string          `json:"approved_by_user_id"`
+	ApprovalReason   string          `json:"approval_reason"`
 }
 
 // ApplySaleReturnedTx appends the final refund fact in the same transaction as
 // payment reversal, stock restoration, and the returned-order state change.
-func (s *Service) ApplySaleReturnedTx(ctx context.Context, tx *sql.Tx, order orders.Order) error {
+func (s *Service) ApplySaleReturnedTx(ctx context.Context, tx *sql.Tx, order orders.Order, approvedByUserID, reason string) error {
 	inventory, err := loadInventoryTx(ctx, tx, order.ID)
 	if err != nil { return err }
 	payments, err := loadPaymentsTx(ctx, tx, order.ID)
 	if err != nil { return err }
-	payload, err := json.Marshal(SaleReturnedPayload{Order: order, Inventory: inventory, Payments: payments})
+	payload, err := json.Marshal(SaleReturnedPayload{
+		Order: order,
+		Inventory: inventory,
+		Payments: payments,
+		ApprovedByUserID: approvedByUserID,
+		ApprovalReason: reason,
+	})
 	if err != nil { return err }
 	metadata, err := json.Marshal(map[string]any{
 		"source": "pos_service", "store_id": order.StoreID, "terminal_id": order.TerminalID,
