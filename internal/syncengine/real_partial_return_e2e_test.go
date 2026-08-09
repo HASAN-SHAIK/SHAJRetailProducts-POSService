@@ -4,16 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/inventory"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/orders"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/outbox"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/payments"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/refunds"
-	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/testutil"
 )
+
+func openRealPartialReturnE2EDatabase(t *testing.T, path string) *database.DB {
+	t.Helper()
+	ctx := context.Background()
+	db, err := database.Open(ctx, path)
+	if err != nil {
+		t.Fatalf("open partial-return E2E database: %v", err)
+	}
+	if err := db.Migrate(ctx); err != nil {
+		_ = db.Close()
+		t.Fatalf("migrate partial-return E2E database: %v", err)
+	}
+	return db
+}
 
 func TestRealCentralPartialReturnE2E(t *testing.T) {
 	centralURL := os.Getenv("POS_E2E_CENTRAL_URL")
@@ -25,7 +40,9 @@ func TestRealCentralPartialReturnE2E(t *testing.T) {
 	syncToken := envOr("POS_E2E_SYNC_TOKEN", "sync-secret")
 	deviceID := envOr("POS_E2E_DEVICE_ID", "device-e2e")
 
-	db := testutil.OpenDatabase(t)
+	dbPath := filepath.Join(t.TempDir(), "pos-test.db")
+	db := openRealPartialReturnE2EDatabase(t, dbPath)
+	defer func() { _ = db.Close() }()
 	ctx := context.Background()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	orderID := "ord-partial-return-cross-repo-e2e"
@@ -126,6 +143,28 @@ func TestRealCentralPartialReturnE2E(t *testing.T) {
 		t.Fatalf("local partial return compensation outbound=%d sale_returns=%d on_hand=%d", outbound, saleReturns, onHand)
 	}
 
+	// Simulate the POS process stopping after the offline refund transaction has
+	// committed but before any of its durable outbox facts are synced to Central.
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db = openRealPartialReturnE2EDatabase(t, dbPath)
+
+	var pendingAfterRestart int
+	if err := db.SQL().QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM outbox_events
+		WHERE status='pending' AND ordering_key=?
+		  AND event_type IN ('sale.partial_returned','payment.recorded','inventory.movement.recorded')`, "sales_order:"+orderID).Scan(&pendingAfterRestart); err != nil {
+		t.Fatal(err)
+	}
+	if pendingAfterRestart != 3 {
+		t.Fatalf("pending partial-return facts after restart=%d want=3", pendingAfterRestart)
+	}
+
+	engine, err = New(outbox.New(db), centralURL, tenantID, syncToken, deviceID, 5*time.Second, 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 10; i++ {
 		var pending int
 		if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox_events WHERE status='pending' AND available_at<=?`, time.Now().UTC().Format(time.RFC3339Nano)).Scan(&pending); err != nil {
@@ -135,7 +174,7 @@ func TestRealCentralPartialReturnE2E(t *testing.T) {
 			break
 		}
 		if !engine.dispatchOne(ctx) {
-			t.Fatal("partial return outbox remained pending but dispatch made no progress")
+			t.Fatal("partial return outbox remained pending after restart but dispatch made no progress")
 		}
 	}
 	var pending int
@@ -143,7 +182,7 @@ func TestRealCentralPartialReturnE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 	if pending != 0 {
-		t.Fatalf("partial return left %d pending outbox events", pending)
+		t.Fatalf("partial return left %d pending outbox events after restart", pending)
 	}
 
 	var partialEventID string
