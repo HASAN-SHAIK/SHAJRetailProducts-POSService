@@ -9,6 +9,7 @@ import (
 
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/inventory"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/orders"
+	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/outbox"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/payments"
 )
 
@@ -30,12 +31,9 @@ type partialCapture struct {
 
 // ReturnPartial atomically plans and records one item-level return, reverses the
 // exact cumulative share of captured tenders, restores only the requested stock,
-// updates local order audit/version state, and advances to returned only when the
-// durable item history has consumed the entire remaining sale.
-//
-// Partial operations intentionally emit only the already-supported standalone
-// payment.recorded and inventory.movement.recorded facts. The final operation
-// additionally emits sale.returned, which Central already understands.
+// updates local order audit/version state, and emits a durable item-level return
+// fact. When the operation consumes the entire remaining sale, the same transaction
+// also advances the order to returned and emits the final sale.returned lifecycle fact.
 func (s *Service) ReturnPartial(ctx context.Context, input PartialReturnInput) (orders.Order, PartialReturnPlan, error) {
 	input.ReturnID = strings.TrimSpace(input.ReturnID)
 	input.OrderID = strings.TrimSpace(input.OrderID)
@@ -71,6 +69,7 @@ func (s *Service) ReturnPartial(ctx context.Context, input PartialReturnInput) (
 
 		ledgerLines := make([]PartialReturnLedgerLine, 0, len(plan.Lines))
 		inventoryLines := make([]inventory.PartialSaleReturnLine, 0, len(plan.Lines))
+		outboxLines := make([]outbox.SalePartialReturnedLine, 0, len(plan.Lines))
 		for _, line := range plan.Lines {
 			ledgerLines = append(ledgerLines, PartialReturnLedgerLine{
 				OrderItemID: line.OrderItemID,
@@ -80,6 +79,11 @@ func (s *Service) ReturnPartial(ctx context.Context, input PartialReturnInput) (
 			inventoryLines = append(inventoryLines, inventory.PartialSaleReturnLine{
 				OrderItemID: line.OrderItemID,
 				QuantityMilli: line.QuantityMilli,
+			})
+			outboxLines = append(outboxLines, outbox.SalePartialReturnedLine{
+				OrderItemID: line.OrderItemID,
+				QuantityMilli: line.QuantityMilli,
+				RefundMinor: line.RefundMinor,
 			})
 		}
 		if _, err := AppendPartialReturnTx(ctx, tx, PartialReturnLedgerRecord{
@@ -102,6 +106,9 @@ func (s *Service) ReturnPartial(ctx context.Context, input PartialReturnInput) (
 
 		updated, err := s.orders.ApplyPartialReturnStateTx(ctx, tx, order, input.ApprovedByUserID, input.Reason, plan.FullRemaining)
 		if err != nil {
+			return err
+		}
+		if err := s.outbox.ApplySalePartialReturnedTx(ctx, tx, updated, input.ReturnID, plan.RefundMinor, outboxLines, input.ApprovedByUserID, input.Reason); err != nil {
 			return err
 		}
 		if plan.FullRemaining {
