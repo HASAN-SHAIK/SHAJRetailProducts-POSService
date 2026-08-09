@@ -32,6 +32,9 @@ func TestGetReconciliationSnapshotSummarizesRefundFacts(t *testing.T) {
 	if before.SaleIssuedQuantityMilli != 1000 || before.RestoredQuantityMilli != 0 {
 		t.Fatalf("before inventory facts=%+v", before)
 	}
+	if before.DeadLetterSyncHead != nil {
+		t.Fatalf("unexpected dead-letter head=%+v", before.DeadLetterSyncHead)
+	}
 
 	if _, err := svc.RefundFullSale(ctx, "ord-refund-full", "manager-1", "customer return"); err != nil {
 		t.Fatal(err)
@@ -85,13 +88,15 @@ func TestGetReconciliationSnapshotIncludesRefundSyncState(t *testing.T) {
 	svc, _ := newRefundService(db)
 
 	for _, event := range []struct {
-		id      string
-		version int
-		status  string
+		id           string
+		version      int
+		status       string
+		attemptCount int
+		createdAt    string
 	}{
-		{id: "evt-reconciliation-published", version: 3, status: "published"},
-		{id: "evt-reconciliation-pending", version: 4, status: "pending"},
-		{id: "evt-reconciliation-dead", version: 5, status: "dead_letter"},
+		{id: "evt-reconciliation-published", version: 3, status: "published", attemptCount: 1, createdAt: "2026-08-09T09:59:00Z"},
+		{id: "evt-reconciliation-pending", version: 4, status: "pending", attemptCount: 0, createdAt: "2026-08-09T10:00:00Z"},
+		{id: "evt-reconciliation-dead", version: 5, status: "dead_letter", attemptCount: 12, createdAt: "2026-08-09T10:01:00Z"},
 	} {
 		if _, err := db.SQL().ExecContext(ctx, `
 			INSERT INTO outbox_events(
@@ -99,7 +104,7 @@ func TestGetReconciliationSnapshotIncludesRefundSyncState(t *testing.T) {
 				payload_json,metadata_json,status,attempt_count,available_at,created_at
 			) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			event.id, "sales_order", "ord-refund-full", event.version, "sale.partial_returned", 1, "sales_order:ord-refund-full",
-			"{}", "{}", event.status, 0, "2026-08-09T10:00:00Z", "2026-08-09T10:00:00Z"); err != nil {
+			"{}", "{}", event.status, event.attemptCount, "2026-08-09T10:00:00Z", event.createdAt); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -107,7 +112,7 @@ func TestGetReconciliationSnapshotIncludesRefundSyncState(t *testing.T) {
 		INSERT INTO outbox_events(
 			id,aggregate_type,aggregate_id,aggregate_version,event_type,schema_version,ordering_key,
 			payload_json,metadata_json,status,attempt_count,available_at,created_at
-		) VALUES('evt-other-order','sales_order','ord-other',1,'sale.completed',1,'sales_order:ord-other','{}','{}','dead_letter',0,'2026-08-09T10:00:00Z','2026-08-09T10:00:00Z')`); err != nil {
+		) VALUES('evt-other-order','sales_order','ord-other',1,'sale.completed',1,'sales_order:ord-other','{}','{}','dead_letter',12,'2026-08-09T10:00:00Z','2026-08-09T09:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -117,6 +122,15 @@ func TestGetReconciliationSnapshotIncludesRefundSyncState(t *testing.T) {
 	}
 	if snapshot.UnpublishedSyncFacts != 2 || snapshot.DeadLetterSyncFacts != 1 {
 		t.Fatalf("sync facts=%+v", snapshot)
+	}
+	if snapshot.DeadLetterSyncHead == nil {
+		t.Fatalf("missing dead-letter head=%+v", snapshot)
+	}
+	if snapshot.DeadLetterSyncHead.EventID != "evt-reconciliation-dead" ||
+		snapshot.DeadLetterSyncHead.EventType != "sale.partial_returned" ||
+		snapshot.DeadLetterSyncHead.AttemptCount != 12 ||
+		snapshot.DeadLetterSyncHead.CreatedAt != "2026-08-09T10:01:00Z" {
+		t.Fatalf("dead-letter head=%+v", snapshot.DeadLetterSyncHead)
 	}
 }
 
