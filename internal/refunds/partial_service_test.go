@@ -52,10 +52,16 @@ func TestReturnPartialCommitsLedgerProportionalTenderAndInventoryAtomically(t *t
 	}
 
 	var cashRefund, cardRefund int64
-	if err := db.SQL().QueryRowContext(ctx, `SELECT COALESCE(SUM(amount_minor),0) FROM payments WHERE order_id='ord-refund-full' AND direction='out' AND reference='capture-cash'`).Scan(&cashRefund); err != nil {
+	if err := db.SQL().QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(r.amount_minor),0)
+		FROM payments r JOIN payments p ON r.reference=p.id
+		WHERE r.order_id='ord-refund-full' AND r.direction='out' AND p.client_payment_id='capture-cash'`).Scan(&cashRefund); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SQL().QueryRowContext(ctx, `SELECT COALESCE(SUM(amount_minor),0) FROM payments WHERE order_id='ord-refund-full' AND direction='out' AND reference='capture-card'`).Scan(&cardRefund); err != nil {
+	if err := db.SQL().QueryRowContext(ctx, `
+		SELECT COALESCE(SUM(r.amount_minor),0)
+		FROM payments r JOIN payments p ON r.reference=p.id
+		WHERE r.order_id='ord-refund-full' AND r.direction='out' AND p.client_payment_id='capture-card'`).Scan(&cardRefund); err != nil {
 		t.Fatal(err)
 	}
 	if cashRefund != 1500 || cardRefund != 1000 {
