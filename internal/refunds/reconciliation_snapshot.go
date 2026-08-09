@@ -21,10 +21,12 @@ type ReconciliationSnapshot struct {
 	RestoredQuantityMilli    int64  `json:"restored_quantity_milli"`
 	PartialReturnOperations  int64  `json:"partial_return_operations"`
 	PartialReturnRefundMinor int64  `json:"partial_return_refund_minor"`
+	UnpublishedSyncFacts     int64  `json:"unpublished_sync_facts"`
+	DeadLetterSyncFacts      int64  `json:"dead_letter_sync_facts"`
 }
 
-// GetReconciliationSnapshot reads payment, inventory and partial-return ledger
-// facts for one sale without mutating any POS state.
+// GetReconciliationSnapshot reads payment, inventory, partial-return ledger and
+// outbound sync facts for one sale without mutating any POS state.
 func (s *Service) GetReconciliationSnapshot(ctx context.Context, orderID string) (ReconciliationSnapshot, error) {
 	orderID = strings.TrimSpace(orderID)
 	if orderID == "" {
@@ -71,6 +73,16 @@ func (s *Service) GetReconciliationSnapshot(ctx context.Context, orderID string)
 		SELECT COUNT(*),COALESCE(SUM(refund_minor),0)
 		FROM pos_partial_returns
 		WHERE order_id=?`, orderID).Scan(&snapshot.PartialReturnOperations, &snapshot.PartialReturnRefundMinor); err != nil {
+		return ReconciliationSnapshot{}, err
+	}
+
+	orderingKey := "sales_order:" + orderID
+	if err := s.db.SQL().QueryRowContext(ctx, `
+		SELECT
+			COALESCE(SUM(CASE WHEN status <> 'published' THEN 1 ELSE 0 END),0),
+			COALESCE(SUM(CASE WHEN status = 'dead_letter' THEN 1 ELSE 0 END),0)
+		FROM outbox_events
+		WHERE ordering_key=?`, orderingKey).Scan(&snapshot.UnpublishedSyncFacts, &snapshot.DeadLetterSyncFacts); err != nil {
 		return ReconciliationSnapshot{}, err
 	}
 
