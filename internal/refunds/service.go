@@ -71,7 +71,7 @@ func (s *Service) RefundFullSale(ctx context.Context, orderID, approvedByUserID,
 			return s.inventory.ApplySaleReturnTx(ctx, tx, order)
 		},
 		func(ctx context.Context, tx *sql.Tx, order orders.Order, _ int64) error {
-			return s.outbox.ApplySaleReturnedTx(ctx, tx, order)
+			return s.outbox.ApplySaleReturnedTx(ctx, tx, order, approvedByUserID, reason)
 		},
 	)
 }
