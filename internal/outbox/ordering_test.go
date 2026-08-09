@@ -115,3 +115,95 @@ func TestClaimNextPreservesRefundOrderingWithoutBlockingOtherSales(t *testing.T)
 		t.Fatalf("third refund claim=%+v want evt-refund-sale", partialReturnFact)
 	}
 }
+
+func TestDeadLetterRefundHeadBlocksSameOrderAcrossRestartButNotOtherSales(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "outbox-dead-letter-ordering.db")
+	openDB := func() *database.DB {
+		db, err := database.Open(ctx, dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Migrate(ctx); err != nil {
+			_ = db.Close()
+			t.Fatal(err)
+		}
+		return db
+	}
+
+	db := openDB()
+	base := time.Now().UTC().Add(-time.Minute)
+	insertOrderingEvent(t, db, "evt-dead-refund-payment", "payment.recorded", "sales_order:ord-dead-refund", base.Format(time.RFC3339Nano))
+	insertOrderingEvent(t, db, "evt-dead-refund-inventory", "inventory.movement.recorded", "sales_order:ord-dead-refund", base.Add(time.Millisecond).Format(time.RFC3339Nano))
+	insertOrderingEvent(t, db, "evt-dead-refund-sale", "sale.partial_returned", "sales_order:ord-dead-refund", base.Add(2*time.Millisecond).Format(time.RFC3339Nano))
+	insertOrderingEvent(t, db, "evt-independent-sale", "sale.completed", "sales_order:ord-independent", base.Add(3*time.Millisecond).Format(time.RFC3339Nano))
+
+	// Put the refund head one attempt away from dead-lettering, then let the
+	// production failure path perform the terminal transition.
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE outbox_events SET attempt_count=11 WHERE id='evt-dead-refund-payment'`); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(db)
+	head, err := svc.ClaimNext(ctx, "worker-dead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if head == nil || head.ID != "evt-dead-refund-payment" {
+		t.Fatalf("dead-letter head claim=%+v want evt-dead-refund-payment", head)
+	}
+	if err := svc.MarkFailed(ctx, head.ID, "worker-dead", "prolonged central outage"); err != nil {
+		t.Fatal(err)
+	}
+
+	var status string
+	var attempts int
+	if err := db.SQL().QueryRowContext(ctx, `SELECT status,attempt_count FROM outbox_events WHERE id='evt-dead-refund-payment'`).Scan(&status, &attempts); err != nil {
+		t.Fatal(err)
+	}
+	if status != "dead_letter" || attempts != 12 {
+		t.Fatalf("refund head status=%s attempts=%d want dead_letter/12", status, attempts)
+	}
+
+	// A poisoned refund ordering key must fail closed, but unrelated sales must
+	// still make progress so one bad refund does not stall the whole terminal.
+	independent, err := svc.ClaimNext(ctx, "worker-dead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if independent == nil || independent.ID != "evt-independent-sale" {
+		t.Fatalf("claim with dead-letter refund head=%+v want evt-independent-sale", independent)
+	}
+	if err := svc.MarkPublished(ctx, independent.ID, "worker-dead"); err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := svc.ClaimNext(ctx, "worker-dead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked != nil {
+		t.Fatalf("same-order refund fact overtook dead-letter head before restart: %+v", blocked)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db = openDB()
+	defer db.Close()
+	svc = New(db)
+
+	// Restart must not erase the fail-closed boundary or implicitly requeue the
+	// poisoned refund. A future recovery mechanism must be explicit and audited.
+	if err := db.SQL().QueryRowContext(ctx, `SELECT status,attempt_count FROM outbox_events WHERE id='evt-dead-refund-payment'`).Scan(&status, &attempts); err != nil {
+		t.Fatal(err)
+	}
+	if status != "dead_letter" || attempts != 12 {
+		t.Fatalf("dead-letter refund head changed across restart status=%s attempts=%d", status, attempts)
+	}
+	blocked, err = svc.ClaimNext(ctx, "worker-after-restart")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked != nil {
+		t.Fatalf("same-order refund fact overtook dead-letter head after restart: %+v", blocked)
+	}
+}
