@@ -165,6 +165,36 @@ func TestCentralAuthorizedRecoverySurvivesRestartAndPreservesOrderHead(t *testin
 		t.Fatal(err)
 	}
 
+	restartedDevice := device.New(db)
+	restartedIdentity, err := restartedDevice.EnsureInstallation(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restartedIdentity.DeviceID != identity.DeviceID {
+		t.Fatalf("device identity changed across restart: before=%s after=%s", identity.DeviceID, restartedIdentity.DeviceID)
+	}
+
+	restartedServer := &Server{
+		cfg:    config.Config{CentralTenantID: "tenant-1", OfflineGrantSecret: publicPEM},
+		db:     db,
+		device: restartedDevice,
+	}
+	replayReq := httptest.NewRequest(http.MethodPost, "/api/v1/orders/"+orderID+"/sync-recovery", strings.NewReader(`{"grant":"`+grant+`"}`))
+	replayReq.SetPathValue("id", orderID)
+	replayRes := httptest.NewRecorder()
+	restartedServer.handleSyncRecovery(replayRes, replayReq)
+	if replayRes.Code != http.StatusConflict || !strings.Contains(replayRes.Body.String(), `"error":"sync_recovery_grant_consumed"`) {
+		t.Fatalf("replayed recovery status=%d body=%s", replayRes.Code, replayRes.Body.String())
+	}
+
+	var recoveryAuditCount int
+	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM pos_sync_recoveries WHERE recovery_id='recovery-restart-1'`).Scan(&recoveryAuditCount); err != nil {
+		t.Fatal(err)
+	}
+	if recoveryAuditCount != 1 {
+		t.Fatalf("recovery audit rows=%d want=1 after restart replay", recoveryAuditCount)
+	}
+
 	claimed, err := outbox.New(db).ClaimNext(ctx, "restart-recovery-certification")
 	if err != nil {
 		t.Fatal(err)
