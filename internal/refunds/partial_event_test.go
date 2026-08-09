@@ -19,17 +19,18 @@ func TestReturnPartialEmitsItemLevelFactAndFinalOperationAlsoEmitsSaleReturned(t
 		t.Fatal(err)
 	}
 
-	if _, _, err := svc.ReturnPartial(ctx, PartialReturnInput{
+	firstOrder, _, err := svc.ReturnPartial(ctx, PartialReturnInput{
 		ReturnID: "ret-event-1", OrderID: "ord-refund-full", ApprovedByUserID: "manager-1", Reason: "first item return",
 		Lines: []PartialReturnLineInput{{OrderItemID: "item-refund-full", QuantityMilli: 250}},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	var payloadRaw string
 	if err := db.SQL().QueryRowContext(ctx, `
 		SELECT payload_json FROM outbox_events
-		WHERE aggregate_id='ord-refund-full' AND event_type='sale.partial_returned' AND aggregate_version=3`).Scan(&payloadRaw); err != nil {
+		WHERE aggregate_id='ord-refund-full' AND event_type='sale.partial_returned' AND aggregate_version=?`, firstOrder.Version).Scan(&payloadRaw); err != nil {
 		t.Fatal(err)
 	}
 	var payload struct {
@@ -53,7 +54,7 @@ func TestReturnPartialEmitsItemLevelFactAndFinalOperationAlsoEmitsSaleReturned(t
 	if payload.ReturnID != "ret-event-1" || payload.RefundMinor != 2500 || payload.ApprovedByUserID != "manager-1" || payload.ApprovalReason != "first item return" {
 		t.Fatalf("partial event audit mismatch %+v", payload)
 	}
-	if payload.Order.Status != "completed" || payload.Order.Version != 3 || len(payload.Lines) != 1 || payload.Lines[0].OrderItemID != "item-refund-full" || payload.Lines[0].QuantityMilli != 250 || payload.Lines[0].RefundMinor != 2500 {
+	if payload.Order.Status != "completed" || payload.Order.Version != firstOrder.Version || len(payload.Lines) != 1 || payload.Lines[0].OrderItemID != "item-refund-full" || payload.Lines[0].QuantityMilli != 250 || payload.Lines[0].RefundMinor != 2500 {
 		t.Fatalf("partial event facts mismatch %+v", payload)
 	}
 
@@ -61,7 +62,8 @@ func TestReturnPartialEmitsItemLevelFactAndFinalOperationAlsoEmitsSaleReturned(t
 		ReturnID: "ret-event-2", OrderID: "ord-refund-full", ApprovedByUserID: "manager-2", Reason: "return remainder",
 		Lines: []PartialReturnLineInput{{OrderItemID: "item-refund-full", QuantityMilli: 750}},
 	}
-	if _, _, err := svc.ReturnPartial(ctx, finalInput); err != nil {
+	finalOrder, _, err := svc.ReturnPartial(ctx, finalInput)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -79,7 +81,7 @@ func TestReturnPartialEmitsItemLevelFactAndFinalOperationAlsoEmitsSaleReturned(t
 	var finalStatus string
 	if err := db.SQL().QueryRowContext(ctx, `
 		SELECT json_extract(payload_json,'$.order.status') FROM outbox_events
-		WHERE aggregate_id='ord-refund-full' AND event_type='sale.partial_returned' AND aggregate_version=4`).Scan(&finalStatus); err != nil {
+		WHERE aggregate_id='ord-refund-full' AND event_type='sale.partial_returned' AND aggregate_version=?`, finalOrder.Version).Scan(&finalStatus); err != nil {
 		t.Fatal(err)
 	}
 	if finalStatus != "returned" {
