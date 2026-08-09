@@ -48,20 +48,21 @@ func TestRefundReconciliationHandlerReturnsReadOnlyFacts(t *testing.T) {
 }
 
 func TestRefundReconciliationHandlerMapsReadErrors(t *testing.T) {
-	for name, err, want := range map[string]struct {
+	cases := map[string]struct {
 		err  error
 		want int
 	}{
 		"invalid": {refunds.ErrInvalidPartialReturn, http.StatusBadRequest},
 		"missing": {orders.ErrNotFound, http.StatusNotFound},
 		"failure": {errors.New("db unavailable"), http.StatusInternalServerError},
-	} {
+	}
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/orders/ord-1/reconciliation", nil)
 			req.SetPathValue("id", "ord-1")
 			res := httptest.NewRecorder()
-			handleOrderRefundReconciliationWith(fakeRefundReconciliationReader{err: err.err})(res, req)
-			if res.Code != err.want {
+			handleOrderRefundReconciliationWith(fakeRefundReconciliationReader{err: tc.err})(res, req)
+			if res.Code != tc.want {
 				t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
 			}
 		})
