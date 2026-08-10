@@ -30,7 +30,12 @@ func TestOutboxSyncRetriesAfterCentralRestoresAndIsIdempotent(t *testing.T) {
 			t.Error("missing idempotency key")
 		}
 		if accepted[key] > 0 {
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"code":     "SYNC_EVENT_ALREADY_RECEIVED",
+				"event_id": key,
+			})
 			return
 		}
 		var envelope Envelope
