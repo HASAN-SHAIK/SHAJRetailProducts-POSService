@@ -157,10 +157,10 @@ func TestPartialRefundOrderScopedApprovalLifecycleAcrossRestart(t *testing.T) {
 	if err := db.SQL().QueryRowContext(ctx, `SELECT on_hand_milli FROM inventory_balances WHERE store_id='store-1' AND product_id=?`, productID).Scan(&onHand); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM sale_partial_returns WHERE id=? AND order_id=? AND refund_minor=2500`, returnID, approvedID).Scan(&partialOps); err != nil {
+	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM pos_partial_returns WHERE id=? AND order_id=? AND refund_minor=2500`, returnID, approvedID).Scan(&partialOps); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM sale_partial_return_items WHERE return_id=? AND order_item_id=? AND quantity_milli=250`, returnID, itemID).Scan(&partialItems); err != nil {
+	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM pos_partial_return_items WHERE return_id=? AND order_item_id=? AND quantity_milli=250`, returnID, itemID).Scan(&partialItems); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox_events WHERE ordering_key=? AND status='pending' AND event_type IN ('payment.recorded','inventory.movement.recorded','sale.partial_returned')`, "sales_order:"+approvedID).Scan(&pendingFacts); err != nil {
@@ -187,10 +187,10 @@ func TestPartialRefundOrderScopedApprovalLifecycleAcrossRestart(t *testing.T) {
 	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM inventory_movements WHERE order_item_id=? AND movement_type='sale_return'`, itemID).Scan(&returnsAfter); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM sale_partial_returns WHERE id=?`, returnID).Scan(&partialOpsAfter); err != nil {
+	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM pos_partial_returns WHERE id=?`, returnID).Scan(&partialOpsAfter); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM sale_partial_return_items WHERE return_id=?`, returnID).Scan(&partialItemsAfter); err != nil {
+	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM pos_partial_return_items WHERE return_id=?`, returnID).Scan(&partialItemsAfter); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox_events WHERE ordering_key=? AND status='pending' AND event_type IN ('payment.recorded','inventory.movement.recorded','sale.partial_returned')`, "sales_order:"+approvedID).Scan(&pendingAfter); err != nil {
