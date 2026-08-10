@@ -186,8 +186,15 @@ func TestRealCentralPartialReturnE2E(t *testing.T) {
 	var refundEventIDs []string
 	rows, err := db.SQL().QueryContext(ctx, `
 		SELECT id FROM outbox_events
-		WHERE ordering_key=? AND event_type IN ('payment.recorded','inventory.movement.recorded','sale.partial_returned')
-		ORDER BY created_at,id`, "sales_order:"+orderID)
+		WHERE ordering_key=?
+		  AND (
+		    event_type IN ('inventory.movement.recorded','sale.partial_returned')
+		    OR (
+		      event_type='payment.recorded'
+		      AND aggregate_id IN (SELECT id FROM payments WHERE order_id=? AND direction='out')
+		    )
+		  )
+		ORDER BY created_at,id`, "sales_order:"+orderID, orderID)
 	if err != nil {
 		t.Fatal(err)
 	}
