@@ -30,13 +30,14 @@ func (s *Server) handleOrderVoid(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	input.Reason = strings.TrimSpace(input.Reason)
+	orderID := strings.TrimSpace(r.PathValue("id"))
 
 	approverUserID := ""
 	reason := input.Reason
 	if hasLocalPermission(user, permissionPOSVoid) {
 		approverUserID = user.UserID
 	} else {
-		approval, err := s.consumeManagerApproval(r.Context(), r.Header.Get("X-POS-Approval-Token"), user.UserID, permissionPOSVoid)
+		approval, err := s.consumeManagerApprovalForOrder(r.Context(), r.Header.Get("X-POS-Approval-Token"), user.UserID, permissionPOSVoid, orderID)
 		if err != nil {
 			writeJSON(w, http.StatusForbidden, map[string]any{
 				"error": "manager_approval_required",
@@ -53,7 +54,7 @@ func (s *Server) handleOrderVoid(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	order, err := s.orders.VoidWith(r.Context(), r.PathValue("id"), approverUserID, reason)
+	order, err := s.orders.VoidWith(r.Context(), orderID, approverUserID, reason)
 	switch {
 	case errors.Is(err, orders.ErrNotFound):
 		writeError(w, http.StatusNotFound, "order_not_found")
