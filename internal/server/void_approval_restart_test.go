@@ -39,6 +39,14 @@ func TestManagerApprovedVoidConsumesApprovalAndSurvivesRestart(t *testing.T) {
 
 	token := "void-approved-restart-token"
 	seedSensitiveApproval(t, db, token, "cashier-1", permissionPOSVoid)
+	if _, err := db.SQL().ExecContext(ctx, `
+		UPDATE pos_manager_approvals
+		SET order_id=?
+		WHERE cashier_user_id=? AND permission=? AND consumed_at IS NULL`,
+		"ord-void-approved-restart", "cashier-1", permissionPOSVoid); err != nil {
+		db.Close()
+		t.Fatalf("scope approval to order: %v", err)
+	}
 
 	s := &Server{db: db, orders: orders.New(db, nil)}
 	cashier := LocalUserContext{UserID: "cashier-1", Permissions: []string{permissionPOSSale}}
