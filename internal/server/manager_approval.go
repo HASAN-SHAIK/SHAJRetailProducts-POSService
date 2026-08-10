@@ -45,7 +45,7 @@ func approvalRequiresReason(permission string) bool {
 }
 
 func approvalRequiresOrderScope(permission string) bool {
-	return permission == permissionPOSVoid || permission == permissionPOSRefund
+	return permission == permissionPOSVoid
 }
 
 func (s *Server) handleManagerApproval(w http.ResponseWriter, r *http.Request) {
