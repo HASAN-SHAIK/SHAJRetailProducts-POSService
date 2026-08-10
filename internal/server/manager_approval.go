@@ -28,6 +28,7 @@ type managerApprovalInput struct {
 	PIN           string `json:"pin"`
 	Permission    string `json:"permission"`
 	Reason        string `json:"reason"`
+	OrderID       string `json:"order_id,omitempty"`
 }
 
 func isApprovablePermission(permission string) bool {
@@ -41,6 +42,10 @@ func isApprovablePermission(permission string) bool {
 
 func approvalRequiresReason(permission string) bool {
 	return permission == permissionPOSVoid || permission == permissionPOSRefund
+}
+
+func approvalRequiresOrderScope(permission string) bool {
+	return permission == permissionPOSVoid
 }
 
 func (s *Server) handleManagerApproval(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +65,10 @@ func (s *Server) handleManagerApproval(w http.ResponseWriter, r *http.Request) {
 	input.ManagerUserID = strings.TrimSpace(input.ManagerUserID)
 	input.Permission = strings.TrimSpace(input.Permission)
 	input.Reason = strings.TrimSpace(input.Reason)
-	if input.ManagerUserID == "" || input.PIN == "" || !isApprovablePermission(input.Permission) || (approvalRequiresReason(input.Permission) && input.Reason == "") {
+	input.OrderID = strings.TrimSpace(input.OrderID)
+	if input.ManagerUserID == "" || input.PIN == "" || !isApprovablePermission(input.Permission) ||
+		(approvalRequiresReason(input.Permission) && input.Reason == "") ||
+		(approvalRequiresOrderScope(input.Permission) && input.OrderID == "") {
 		writeError(w, http.StatusBadRequest, "invalid_approval_payload")
 		return
 	}
@@ -100,9 +108,9 @@ func (s *Server) handleManagerApproval(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	expires := now.Add(approvalTTL)
 	_, err = s.db.SQL().ExecContext(r.Context(), `
-		INSERT INTO pos_manager_approvals(token_hash,cashier_user_id,approver_user_id,permission,reason,created_at,expires_at)
-		VALUES(?,?,?,?,?,?,?)`,
-		hash[:], cashier.UserID, manager.UserID, input.Permission, nullableApprovalString(input.Reason), now.Format(time.RFC3339Nano), expires.Format(time.RFC3339Nano))
+		INSERT INTO pos_manager_approvals(token_hash,cashier_user_id,approver_user_id,permission,reason,order_id,created_at,expires_at)
+		VALUES(?,?,?,?,?,?,?,?)`,
+		hash[:], cashier.UserID, manager.UserID, input.Permission, nullableApprovalString(input.Reason), nullableApprovalString(input.OrderID), now.Format(time.RFC3339Nano), expires.Format(time.RFC3339Nano))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "approval_issue_failed")
 		return
@@ -117,6 +125,18 @@ func (s *Server) handleManagerApproval(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) consumeManagerApproval(ctx context.Context, rawToken, cashierUserID, permission string) (managerApproval, error) {
+	return s.consumeManagerApprovalScoped(ctx, rawToken, cashierUserID, permission, "", false)
+}
+
+func (s *Server) consumeManagerApprovalForOrder(ctx context.Context, rawToken, cashierUserID, permission, orderID string) (managerApproval, error) {
+	orderID = strings.TrimSpace(orderID)
+	if orderID == "" {
+		return managerApproval{}, errors.New("approval order scope missing")
+	}
+	return s.consumeManagerApprovalScoped(ctx, rawToken, cashierUserID, permission, orderID, true)
+}
+
+func (s *Server) consumeManagerApprovalScoped(ctx context.Context, rawToken, cashierUserID, permission, orderID string, requireOrderScope bool) (managerApproval, error) {
 	rawToken = strings.TrimSpace(rawToken)
 	if rawToken == "" {
 		return managerApproval{}, errors.New("approval token missing")
@@ -131,11 +151,16 @@ func (s *Server) consumeManagerApproval(ctx context.Context, rawToken, cashierUs
 	var approval managerApproval
 	var reason sql.NullString
 	var expiresAt string
-	err = tx.QueryRowContext(ctx, `
+	query := `
 		SELECT approver_user_id,permission,reason,expires_at
 		FROM pos_manager_approvals
-		WHERE token_hash=? AND cashier_user_id=? AND permission=? AND consumed_at IS NULL`,
-		hash[:], cashierUserID, permission).Scan(&approval.ApproverUserID, &approval.Permission, &reason, &expiresAt)
+		WHERE token_hash=? AND cashier_user_id=? AND permission=? AND consumed_at IS NULL`
+	args := []any{hash[:], cashierUserID, permission}
+	if requireOrderScope {
+		query += ` AND order_id=?`
+		args = append(args, orderID)
+	}
+	err = tx.QueryRowContext(ctx, query, args...).Scan(&approval.ApproverUserID, &approval.Permission, &reason, &expiresAt)
 	if err != nil { return managerApproval{}, err }
 	expires, err := time.Parse(time.RFC3339Nano, expiresAt)
 	if err != nil || !now.Before(expires) { return managerApproval{}, errors.New("approval expired") }
