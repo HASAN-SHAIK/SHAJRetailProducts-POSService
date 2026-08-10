@@ -15,6 +15,11 @@ import (
 
 const approvalTTL = 2 * time.Minute
 
+const (
+	approvalActionRefundFull    = "refund_full"
+	approvalActionRefundPartial = "refund_partial"
+)
+
 type approvalContextKey struct{}
 
 type managerApproval struct {
@@ -29,6 +34,7 @@ type managerApprovalInput struct {
 	Permission    string `json:"permission"`
 	Reason        string `json:"reason"`
 	OrderID       string `json:"order_id,omitempty"`
+	ActionScope   string `json:"action_scope,omitempty"`
 }
 
 func isApprovablePermission(permission string) bool {
@@ -46,6 +52,13 @@ func approvalRequiresReason(permission string) bool {
 
 func approvalRequiresOrderScope(permission string) bool {
 	return permission == permissionPOSVoid || permission == permissionPOSRefund
+}
+
+func validApprovalActionScope(permission, actionScope string) bool {
+	if permission != permissionPOSRefund {
+		return actionScope == ""
+	}
+	return actionScope == approvalActionRefundFull || actionScope == approvalActionRefundPartial
 }
 
 func (s *Server) handleManagerApproval(w http.ResponseWriter, r *http.Request) {
@@ -66,9 +79,11 @@ func (s *Server) handleManagerApproval(w http.ResponseWriter, r *http.Request) {
 	input.Permission = strings.TrimSpace(input.Permission)
 	input.Reason = strings.TrimSpace(input.Reason)
 	input.OrderID = strings.TrimSpace(input.OrderID)
+	input.ActionScope = strings.TrimSpace(input.ActionScope)
 	if input.ManagerUserID == "" || input.PIN == "" || !isApprovablePermission(input.Permission) ||
 		(approvalRequiresReason(input.Permission) && input.Reason == "") ||
-		(approvalRequiresOrderScope(input.Permission) && input.OrderID == "") {
+		(approvalRequiresOrderScope(input.Permission) && input.OrderID == "") ||
+		!validApprovalActionScope(input.Permission, input.ActionScope) {
 		writeError(w, http.StatusBadRequest, "invalid_approval_payload")
 		return
 	}
@@ -108,9 +123,9 @@ func (s *Server) handleManagerApproval(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	expires := now.Add(approvalTTL)
 	_, err = s.db.SQL().ExecContext(r.Context(), `
-		INSERT INTO pos_manager_approvals(token_hash,cashier_user_id,approver_user_id,permission,reason,order_id,created_at,expires_at)
-		VALUES(?,?,?,?,?,?,?,?)`,
-		hash[:], cashier.UserID, manager.UserID, input.Permission, nullableApprovalString(input.Reason), nullableApprovalString(input.OrderID), now.Format(time.RFC3339Nano), expires.Format(time.RFC3339Nano))
+		INSERT INTO pos_manager_approvals(token_hash,cashier_user_id,approver_user_id,permission,reason,order_id,action_scope,created_at,expires_at)
+		VALUES(?,?,?,?,?,?,?,?,?)`,
+		hash[:], cashier.UserID, manager.UserID, input.Permission, nullableApprovalString(input.Reason), nullableApprovalString(input.OrderID), nullableApprovalString(input.ActionScope), now.Format(time.RFC3339Nano), expires.Format(time.RFC3339Nano))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "approval_issue_failed")
 		return
@@ -125,7 +140,7 @@ func (s *Server) handleManagerApproval(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) consumeManagerApproval(ctx context.Context, rawToken, cashierUserID, permission string) (managerApproval, error) {
-	return s.consumeManagerApprovalScoped(ctx, rawToken, cashierUserID, permission, "", false)
+	return s.consumeManagerApprovalScoped(ctx, rawToken, cashierUserID, permission, "", "", false, false)
 }
 
 func (s *Server) consumeManagerApprovalForOrder(ctx context.Context, rawToken, cashierUserID, permission, orderID string) (managerApproval, error) {
@@ -133,10 +148,22 @@ func (s *Server) consumeManagerApprovalForOrder(ctx context.Context, rawToken, c
 	if orderID == "" {
 		return managerApproval{}, errors.New("approval order scope missing")
 	}
-	return s.consumeManagerApprovalScoped(ctx, rawToken, cashierUserID, permission, orderID, true)
+	return s.consumeManagerApprovalScoped(ctx, rawToken, cashierUserID, permission, orderID, "", true, false)
 }
 
-func (s *Server) consumeManagerApprovalScoped(ctx context.Context, rawToken, cashierUserID, permission, orderID string, requireOrderScope bool) (managerApproval, error) {
+func (s *Server) consumeManagerApprovalForRefundAction(ctx context.Context, rawToken, cashierUserID, orderID, actionScope string) (managerApproval, error) {
+	orderID = strings.TrimSpace(orderID)
+	actionScope = strings.TrimSpace(actionScope)
+	if orderID == "" {
+		return managerApproval{}, errors.New("approval order scope missing")
+	}
+	if !validApprovalActionScope(permissionPOSRefund, actionScope) {
+		return managerApproval{}, errors.New("approval action scope invalid")
+	}
+	return s.consumeManagerApprovalScoped(ctx, rawToken, cashierUserID, permissionPOSRefund, orderID, actionScope, true, true)
+}
+
+func (s *Server) consumeManagerApprovalScoped(ctx context.Context, rawToken, cashierUserID, permission, orderID, actionScope string, requireOrderScope, requireActionScope bool) (managerApproval, error) {
 	rawToken = strings.TrimSpace(rawToken)
 	if rawToken == "" {
 		return managerApproval{}, errors.New("approval token missing")
@@ -159,6 +186,10 @@ func (s *Server) consumeManagerApprovalScoped(ctx context.Context, rawToken, cas
 	if requireOrderScope {
 		query += ` AND order_id=?`
 		args = append(args, orderID)
+	}
+	if requireActionScope {
+		query += ` AND action_scope=?`
+		args = append(args, actionScope)
 	}
 	err = tx.QueryRowContext(ctx, query, args...).Scan(&approval.ApproverUserID, &approval.Permission, &reason, &expiresAt)
 	if err != nil { return managerApproval{}, err }
