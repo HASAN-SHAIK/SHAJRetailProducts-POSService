@@ -242,4 +242,25 @@ func TestRealCentralPartialReturnE2E(t *testing.T) {
 		}
 		assertRealCentralOutboxState(t, db, id, "published")
 	}
+
+	// Operator-visible reconciliation must converge after the strict Central
+	// duplicate acknowledgements are accepted. Recreate the read-only service on
+	// the reopened database to ensure the snapshot itself is restart-safe.
+	reconciliationService := refunds.New(db, orders.New(db, nil), payments.New(db), inventory.New(db))
+	snapshot, err := reconciliationService.GetReconciliationSnapshot(ctx, orderID)
+	if err != nil {
+		t.Fatalf("read reconciliation after lost-ack restart replay: %v", err)
+	}
+	if snapshot.UnpublishedSyncFacts != 0 || snapshot.DeadLetterSyncFacts != 0 || snapshot.DeadLetterSyncHead != nil {
+		t.Fatalf("reconciliation did not converge after lost-ack restart replay: unpublished=%d dead_letter=%d head=%v", snapshot.UnpublishedSyncFacts, snapshot.DeadLetterSyncFacts, snapshot.DeadLetterSyncHead)
+	}
+	if snapshot.CapturedPaymentMinor != 10000 || snapshot.ReversedPaymentMinor != 2500 {
+		t.Fatalf("unexpected reconciled payment facts captured=%d reversed=%d", snapshot.CapturedPaymentMinor, snapshot.ReversedPaymentMinor)
+	}
+	if snapshot.SaleIssuedQuantityMilli != 1000 || snapshot.RestoredQuantityMilli != 250 {
+		t.Fatalf("unexpected reconciled inventory facts issued=%d restored=%d", snapshot.SaleIssuedQuantityMilli, snapshot.RestoredQuantityMilli)
+	}
+	if snapshot.PartialReturnOperations != 1 || snapshot.PartialReturnRefundMinor != 2500 {
+		t.Fatalf("unexpected reconciled partial-return facts operations=%d refund=%d", snapshot.PartialReturnOperations, snapshot.PartialReturnRefundMinor)
+	}
 }
