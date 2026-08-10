@@ -1,0 +1,35 @@
+name: V1 POS edge acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'internal/**'
+      - '.github/workflows/v1-pos-edge-acceptance.yml'
+  workflow_dispatch:
+
+jobs:
+  edge-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout POS Service
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+
+      - name: Certify V1 void and refund restart lifecycle
+        run: |
+          CGO_ENABLED=1 go test ./internal/server \
+            -run '^(TestManagerApprovedVoidConsumesApprovalAndSurvivesRestart|TestManagerApprovedRefundConsumesApprovalAndSurvivesRestart|TestPartialRefundOrderScopedApprovalLifecycleAcrossRestart|TestRefundManagerApprovalAPIStoresExactCentralAuthorizedScope)$' \
+            -count=1 -v
+
+      - name: Test complete POS package suite
+        run: CGO_ENABLED=1 go test ./... -count=1
+
+      - name: Vet POS Service
+        run: go vet ./...
