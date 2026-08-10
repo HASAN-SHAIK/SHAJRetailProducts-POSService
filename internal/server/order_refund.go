@@ -61,16 +61,22 @@ func (s *Server) handleOrderRefund(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	refundActionScope := approvalActionRefundFull
+	if partial {
+		refundActionScope = approvalActionRefundPartial
+	}
+
 	approverUserID := ""
 	reason := input.Reason
 	if hasLocalPermission(user, permissionPOSRefund) {
 		approverUserID = user.UserID
 	} else {
-		approval, err := s.consumeManagerApprovalForOrder(r.Context(), r.Header.Get("X-POS-Approval-Token"), user.UserID, permissionPOSRefund, orderID)
+		approval, err := s.consumeManagerApprovalForRefundAction(r.Context(), r.Header.Get("X-POS-Approval-Token"), user.UserID, orderID, refundActionScope)
 		if err != nil {
 			writeJSON(w, http.StatusForbidden, map[string]any{
 				"error": "manager_approval_required",
 				"required_permission": permissionPOSRefund,
+				"required_action_scope": refundActionScope,
 			})
 			return
 		}
