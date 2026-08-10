@@ -215,17 +215,30 @@ func TestRealCentralPartialReturnE2E(t *testing.T) {
 
 	// Model lost acknowledgements after Central has already committed all three
 	// refund facts: POS still believes each durable fact is pending and retries
-	// the exact same event identity. Central must answer with its explicit
-	// duplicate acknowledgement, and the strict sync engine may then converge
-	// each local event to published without duplicating canonical effects.
+	// the exact same event identity. Restart POS before replay so the executable
+	// cross-repo path also proves durable recovery of those unacknowledged facts.
 	for _, id := range refundEventIDs {
 		if _, err := db.SQL().ExecContext(ctx, `UPDATE outbox_events SET status='pending',published_at=NULL,locked_at=NULL,last_error=NULL,available_at=? WHERE id=?`, time.Now().UTC().Format(time.RFC3339Nano), id); err != nil {
 			t.Fatal(err)
 		}
 	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db = openRealPartialReturnE2EDatabase(t, dbPath)
+	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox_events WHERE status='pending' AND ordering_key=? AND id IN (?,?,?)`, "sales_order:"+orderID, refundEventIDs[0], refundEventIDs[1], refundEventIDs[2]).Scan(&pendingAfterRestart); err != nil {
+		t.Fatal(err)
+	}
+	if pendingAfterRestart != len(refundEventIDs) {
+		t.Fatalf("lost-ack refund facts after restart=%d want=%d", pendingAfterRestart, len(refundEventIDs))
+	}
+	engine, err = New(outbox.New(db), centralURL, tenantID, syncToken, deviceID, 5*time.Second, 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i, id := range refundEventIDs {
 		if !engine.dispatchOne(ctx) {
-			t.Fatalf("expected lost-ack refund replay dispatch %d for %s", i+1, id)
+			t.Fatalf("expected lost-ack refund replay dispatch %d for %s after restart", i+1, id)
 		}
 		assertRealCentralOutboxState(t, db, id, "published")
 	}
