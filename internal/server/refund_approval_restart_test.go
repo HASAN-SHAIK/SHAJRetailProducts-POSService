@@ -35,7 +35,7 @@ func TestManagerApprovedRefundConsumesApprovalAndSurvivesRestart(t *testing.T) {
 
 	token := "refund-approved-restart-token"
 	seedSensitiveApproval(t, db, token, "cashier-1", permissionPOSRefund)
-	if _, err := db.SQL().ExecContext(ctx, `UPDATE pos_manager_approvals SET order_id=? WHERE cashier_user_id=? AND permission=? AND consumed_at IS NULL`, "ord-refund-approved-restart", "cashier-1", permissionPOSRefund); err != nil { db.Close(); t.Fatalf("scope approval to order: %v", err) }
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE pos_manager_approvals SET order_id=?, action_scope=? WHERE cashier_user_id=? AND permission=? AND consumed_at IS NULL`, "ord-refund-approved-restart", approvalActionRefundFull, "cashier-1", permissionPOSRefund); err != nil { db.Close(); t.Fatalf("scope approval to full refund: %v", err) }
 
 	s := &Server{db: db, orders: orders.New(db, nil), payments: paymentService, inventory: inventory.New(db)}
 	cashier := LocalUserContext{UserID: "cashier-1", Permissions: []string{permissionPOSSale}}
@@ -47,7 +47,7 @@ func TestManagerApprovedRefundConsumesApprovalAndSurvivesRestart(t *testing.T) {
 	s.handleOrderRefund(res, req)
 	if res.Code != http.StatusOK { db.Close(); t.Fatalf("approved refund status=%d body=%s", res.Code, res.Body.String()) }
 	if !strings.Contains(res.Body.String(), `"refunded_by_user_id":"manager-1"`) { db.Close(); t.Fatalf("approved refund lost manager identity body=%s", res.Body.String()) }
-	if _, err := s.consumeManagerApproval(ctx, token, "cashier-1", permissionPOSRefund); err == nil { db.Close(); t.Fatal("successful refund left one-time approval reusable before restart") }
+	if _, err := s.consumeManagerApprovalForRefundAction(ctx, token, "cashier-1", "ord-refund-approved-restart", approvalActionRefundFull); err == nil { db.Close(); t.Fatal("successful refund left one-time approval reusable before restart") }
 	if err := db.Close(); err != nil { t.Fatal(err) }
 
 	reopened, err := database.Open(ctx, path)
@@ -70,7 +70,7 @@ func TestManagerApprovedRefundConsumesApprovalAndSurvivesRestart(t *testing.T) {
 
 	restartedPaymentService := payments.New(reopened)
 	restarted := &Server{db: reopened, orders: orders.New(reopened, nil), payments: restartedPaymentService, inventory: inventory.New(reopened)}
-	if _, err := restarted.consumeManagerApproval(ctx, token, "cashier-1", permissionPOSRefund); err == nil { t.Fatal("consumed refund approval became reusable after restart") }
+	if _, err := restarted.consumeManagerApprovalForRefundAction(ctx, token, "cashier-1", "ord-refund-approved-restart", approvalActionRefundFull); err == nil { t.Fatal("consumed refund approval became reusable after restart") }
 
 	replay := httptest.NewRequest(http.MethodPost, "/api/v1/orders/ord-refund-approved-restart/refund", strings.NewReader(`{"reason":"retry"}`))
 	replay.SetPathValue("id", "ord-refund-approved-restart")
