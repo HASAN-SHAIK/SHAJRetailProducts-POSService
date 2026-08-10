@@ -25,41 +25,41 @@ func TestRefundApprovalHTTPRejectsWrongOrderWithoutBurningToken(t *testing.T) {
 	}
 
 	const (
-		token       = "refund-http-order-scoped-approval"
 		cashierID   = "cashier-1"
 		approvedID  = "order-approved"
 		attemptedID = "order-wrong"
 	)
-	hash := sha256.Sum256([]byte(token))
 	now := time.Now().UTC()
-	if _, err := db.SQL().ExecContext(ctx, `
-		INSERT INTO pos_manager_approvals(
-			token_hash,cashier_user_id,approver_user_id,permission,reason,order_id,created_at,expires_at
-		) VALUES(?,?,?,?,?,?,?,?)`,
-		hash[:], cashierID, "manager-1", permissionPOSRefund, "approved refund", approvedID,
-		now.Format(time.RFC3339Nano), now.Add(time.Minute).Format(time.RFC3339Nano)); err != nil {
-		t.Fatalf("seed approval: %v", err)
-	}
-
 	s := &Server{db: db}
 	cashier := LocalUserContext{UserID: cashierID, Permissions: []string{permissionPOSSale}}
 
 	attempts := []struct {
-		name string
-		body string
+		name        string
+		token       string
+		actionScope string
+		body        string
 	}{
-		{name: "full refund", body: `{"reason":"cashier reason"}`},
-		{name: "partial refund", body: `{"return_id":"return-wrong-order","lines":[{"order_item_id":"item-1","quantity_milli":250}],"reason":"cashier reason"}`},
+		{name: "full refund", token: "refund-http-order-full", actionScope: approvalActionRefundFull, body: `{"reason":"cashier reason"}`},
+		{name: "partial refund", token: "refund-http-order-partial", actionScope: approvalActionRefundPartial, body: `{"return_id":"return-wrong-order","lines":[{"order_item_id":"item-1","quantity_milli":250}],"reason":"cashier reason"}`},
 	}
 
 	for _, tc := range attempts {
 		t.Run(tc.name, func(t *testing.T) {
+			hash := sha256.Sum256([]byte(tc.token))
+			if _, err := db.SQL().ExecContext(ctx, `
+				INSERT INTO pos_manager_approvals(
+					token_hash,cashier_user_id,approver_user_id,permission,reason,order_id,action_scope,created_at,expires_at
+				) VALUES(?,?,?,?,?,?,?,?,?)`,
+				hash[:], cashierID, "manager-1", permissionPOSRefund, "approved refund", approvedID, tc.actionScope,
+				now.Format(time.RFC3339Nano), now.Add(time.Minute).Format(time.RFC3339Nano)); err != nil {
+				t.Fatalf("seed approval: %v", err)
+			}
+
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/orders/"+attemptedID+"/refund", strings.NewReader(tc.body))
 			req.SetPathValue("id", attemptedID)
-			req.Header.Set("X-POS-Approval-Token", token)
+			req.Header.Set("X-POS-Approval-Token", tc.token)
 			req = req.WithContext(context.WithValue(req.Context(), authContextKey{}, cashier))
 			res := httptest.NewRecorder()
-
 			s.handleOrderRefund(res, req)
 
 			if res.Code != http.StatusForbidden || !strings.Contains(res.Body.String(), "manager_approval_required") {
@@ -73,17 +73,17 @@ func TestRefundApprovalHTTPRejectsWrongOrderWithoutBurningToken(t *testing.T) {
 			if consumedAt != nil {
 				t.Fatalf("wrong-order %s burned approval: consumed_at=%v", tc.name, *consumedAt)
 			}
-		})
-	}
 
-	approval, err := s.consumeManagerApprovalForOrder(ctx, token, cashierID, permissionPOSRefund, approvedID)
-	if err != nil {
-		t.Fatalf("correct order could not consume preserved approval: %v", err)
-	}
-	if approval.ApproverUserID != "manager-1" || approval.Reason != "approved refund" {
-		t.Fatalf("unexpected approval after wrong-order attempts: %+v", approval)
-	}
-	if _, err := s.consumeManagerApprovalForOrder(ctx, token, cashierID, permissionPOSRefund, approvedID); err == nil {
-		t.Fatal("correct-order approval remained reusable after consumption")
+			approval, err := s.consumeManagerApprovalForRefundAction(ctx, tc.token, cashierID, approvedID, tc.actionScope)
+			if err != nil {
+				t.Fatalf("correct order/action could not consume preserved approval: %v", err)
+			}
+			if approval.ApproverUserID != "manager-1" || approval.Reason != "approved refund" {
+				t.Fatalf("unexpected approval after wrong-order attempt: %+v", approval)
+			}
+			if _, err := s.consumeManagerApprovalForRefundAction(ctx, tc.token, cashierID, approvedID, tc.actionScope); err == nil {
+				t.Fatal("correct-order/action approval remained reusable after consumption")
+			}
+		})
 	}
 }
