@@ -39,6 +39,10 @@ func isApprovablePermission(permission string) bool {
 	}
 }
 
+func approvalRequiresReason(permission string) bool {
+	return permission == permissionPOSVoid || permission == permissionPOSRefund
+}
+
 func (s *Server) handleManagerApproval(w http.ResponseWriter, r *http.Request) {
 	cashier, ok := localUserFromContext(r.Context())
 	if !ok {
@@ -56,7 +60,7 @@ func (s *Server) handleManagerApproval(w http.ResponseWriter, r *http.Request) {
 	input.ManagerUserID = strings.TrimSpace(input.ManagerUserID)
 	input.Permission = strings.TrimSpace(input.Permission)
 	input.Reason = strings.TrimSpace(input.Reason)
-	if input.ManagerUserID == "" || input.PIN == "" || !isApprovablePermission(input.Permission) {
+	if input.ManagerUserID == "" || input.PIN == "" || !isApprovablePermission(input.Permission) || (approvalRequiresReason(input.Permission) && input.Reason == "") {
 		writeError(w, http.StatusBadRequest, "invalid_approval_payload")
 		return
 	}
