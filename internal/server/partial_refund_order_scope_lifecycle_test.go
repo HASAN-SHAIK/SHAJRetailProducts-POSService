@@ -77,9 +77,9 @@ func TestPartialRefundOrderScopedApprovalLifecycleAcrossRestart(t *testing.T) {
 	hash := sha256.Sum256([]byte(token))
 	if _, err := db.SQL().ExecContext(ctx, `
 		INSERT INTO pos_manager_approvals(
-			token_hash,cashier_user_id,approver_user_id,permission,reason,order_id,created_at,expires_at
-		) VALUES(?,?,?,?,?,?,?,?)`,
-		hash[:], cashierID, managerID, permissionPOSRefund, "customer returned one quarter", approvedID,
+			token_hash,cashier_user_id,approver_user_id,permission,reason,order_id,action_scope,created_at,expires_at
+		) VALUES(?,?,?,?,?,?,?,?,?)`,
+		hash[:], cashierID, managerID, permissionPOSRefund, "customer returned one quarter", approvedID, approvalActionRefundPartial,
 		nowText, now.Add(time.Minute).Format(time.RFC3339Nano)); err != nil {
 		db.Close()
 		t.Fatalf("seed approval: %v", err)
