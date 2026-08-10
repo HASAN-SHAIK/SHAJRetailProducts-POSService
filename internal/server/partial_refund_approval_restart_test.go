@@ -79,6 +79,14 @@ func TestManagerApprovedPartialRefundConsumesApprovalAndSurvivesRestart(t *testi
 
 	token := "partial-approved-restart-token"
 	seedSensitiveApproval(t, db, token, "cashier-1", permissionPOSRefund)
+	if _, err := db.SQL().ExecContext(ctx, `
+		UPDATE pos_manager_approvals
+		SET order_id=?
+		WHERE cashier_user_id=? AND permission=? AND consumed_at IS NULL`,
+		"ord-partial-approved-restart", "cashier-1", permissionPOSRefund); err != nil {
+		db.Close()
+		t.Fatalf("scope approval to order: %v", err)
+	}
 
 	s := &Server{
 		db:        db,
