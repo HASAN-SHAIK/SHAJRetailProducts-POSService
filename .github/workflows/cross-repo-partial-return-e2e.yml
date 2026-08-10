@@ -160,6 +160,45 @@ jobs:
       - name: Partially return sale, sync compensation facts and replay item-level return
         run: CGO_ENABLED=1 go test ./internal/syncengine -run '^TestRealCentralPartialReturnE2E$' -count=1 -v
 
+      - name: Reject tampered replay of a committed refund event identity
+        run: |
+          event_id=$(psql -h 127.0.0.1 -U postgres -d tenant_e2e -At -v ON_ERROR_STOP=1 -c "SELECT event_id FROM pos_sync_events WHERE event_type='sale.partial_returned' AND aggregate_id='ord-partial-return-cross-repo-e2e' LIMIT 1")
+          if [ -z "$event_id" ]; then
+            echo "missing committed partial-return event"
+            exit 1
+          fi
+
+          cat > /tmp/tampered-partial-return.json <<JSON
+          {
+            "event_id": "$event_id",
+            "event_type": "sale.partial_returned",
+            "schema_version": 1,
+            "aggregate_type": "sales_order",
+            "aggregate_id": "ord-partial-return-cross-repo-e2e",
+            "aggregate_version": 3,
+            "ordering_key": "sales_order:ord-partial-return-cross-repo-e2e",
+            "payload": {"tampered": true, "refund_minor": 999999},
+            "metadata": {"source": "pos_service"},
+            "created_at": "2026-08-10T00:00:00Z"
+          }
+          JSON
+
+          http_code=$(curl -sS -o /tmp/tampered-partial-return-response.json -w '%{http_code}' \
+            -X POST http://127.0.0.1:5001/api/v1/sync/events \
+            -H 'Content-Type: application/json' \
+            -H 'X-POS-Tenant-ID: tenant-e2e' \
+            -H 'X-POS-Device-ID: device-e2e' \
+            -H 'X-POS-Sync-Token: sync-secret' \
+            -H "Idempotency-Key: $event_id" \
+            --data-binary @/tmp/tampered-partial-return.json)
+
+          if [ "$http_code" != "409" ]; then
+            echo "tampered replay expected HTTP 409, got $http_code"
+            cat /tmp/tampered-partial-return-response.json
+            exit 1
+          fi
+          node -e "const fs=require('fs'); const body=JSON.parse(fs.readFileSync('/tmp/tampered-partial-return-response.json','utf8')); if(body.code!=='SYNC_EVENT_ID_COLLISION'||body.event_id!==process.argv[1]) { console.error(body); process.exit(1); }" "$event_id"
+
       - name: Verify partial-return convergence and exactly-once replay
         run: |
           assert_one() {
