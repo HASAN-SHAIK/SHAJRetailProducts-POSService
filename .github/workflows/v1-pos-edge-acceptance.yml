@@ -40,6 +40,12 @@ jobs:
             -run '^TestRefundEventRecoversWhenCentralAcceptsButAcknowledgementIsLost$' \
             -count=1 -v
 
+      - name: Certify V1 lost-ack restart and same-order refund ordering
+        run: |
+          CGO_ENABLED=1 go test ./internal/syncengine \
+            -run '^TestV1RefundSyncLostAckRestartAndOrderingAcceptance$' \
+            -count=1 -v
+
       - name: Test complete POS package suite
         run: CGO_ENABLED=1 go test ./... -count=1
 
