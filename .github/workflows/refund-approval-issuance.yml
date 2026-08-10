@@ -1,0 +1,33 @@
+name: Refund approval issuance certification
+
+on:
+  pull_request:
+    paths:
+      - 'internal/server/**'
+      - 'internal/localauth/**'
+      - '.github/workflows/refund-approval-issuance.yml'
+  workflow_dispatch:
+
+jobs:
+  refund-approval-issuance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout POS Service
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+
+      - name: Certify Central-authorized refund approval issuance
+        run: |
+          CGO_ENABLED=1 go test ./internal/server \
+            -run '^TestRefundManagerApprovalAPIStoresExactCentralAuthorizedScope$' \
+            -count=1 -v
+
+      - name: Vet POS Service
+        run: go vet ./...
