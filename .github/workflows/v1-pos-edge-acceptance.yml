@@ -28,6 +28,12 @@ jobs:
             -run '^(TestManagerApprovedVoidConsumesApprovalAndSurvivesRestart|TestManagerApprovedRefundConsumesApprovalAndSurvivesRestart|TestPartialRefundOrderScopedApprovalLifecycleAcrossRestart|TestRefundManagerApprovalAPIStoresExactCentralAuthorizedScope)$' \
             -count=1 -v
 
+      - name: Certify V1 Central-authorized recovery across restart
+        run: |
+          CGO_ENABLED=1 go test ./internal/server \
+            -run '^TestCentralAuthorizedRecoverySurvivesRestartAndPreservesOrderHead$' \
+            -count=1 -v
+
       - name: Test complete POS package suite
         run: CGO_ENABLED=1 go test ./... -count=1
 
