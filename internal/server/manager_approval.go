@@ -139,7 +139,10 @@ func (s *Server) consumeManagerApproval(ctx context.Context, rawToken, cashierUs
 	if err != nil { return managerApproval{}, err }
 	expires, err := time.Parse(time.RFC3339Nano, expiresAt)
 	if err != nil || !now.Before(expires) { return managerApproval{}, errors.New("approval expired") }
-	if reason.Valid { approval.Reason = reason.String }
+	if reason.Valid { approval.Reason = strings.TrimSpace(reason.String) }
+	if approvalRequiresReason(permission) && approval.Reason == "" {
+		return managerApproval{}, errors.New("approval reason missing")
+	}
 
 	result, err := tx.ExecContext(ctx, `
 		UPDATE pos_manager_approvals SET consumed_at=?
