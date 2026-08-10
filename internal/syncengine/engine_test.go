@@ -39,12 +39,40 @@ func TestPublishUsesCentralPOSContract(t *testing.T) {
     if got.EventID != "evt-1" || got.EventType != "sale.completed" || got.AggregateID != "ord-1" { t.Fatalf("unexpected envelope: %#v", got) }
 }
 
-func TestConflictIsAcceptedAsIdempotentAck(t *testing.T) {
-    server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusConflict) }))
+func TestCentralDuplicateForSameEventIsAcceptedAsIdempotentAck(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusConflict)
+        _, _ = w.Write([]byte(`{"code":"SYNC_EVENT_ALREADY_RECEIVED","event_id":"evt-1"}`))
+    }))
     defer server.Close()
     engine, err := New(nil, server.URL, "tenant-1", "secret", "dev-1", time.Second, time.Second)
     if err != nil { t.Fatal(err) }
-    if err := engine.publish(context.Background(), testEvent()); err != nil { t.Fatalf("conflict should ack duplicate: %v", err) }
+    if err := engine.publish(context.Background(), testEvent()); err != nil { t.Fatalf("matching Central duplicate should ack lost acknowledgement replay: %v", err) }
+}
+
+func TestConflictForDifferentEventIsNotAcceptedAsAck(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusConflict)
+        _, _ = w.Write([]byte(`{"code":"SYNC_EVENT_ALREADY_RECEIVED","event_id":"evt-other"}`))
+    }))
+    defer server.Close()
+    engine, err := New(nil, server.URL, "tenant-1", "secret", "dev-1", time.Second, time.Second)
+    if err != nil { t.Fatal(err) }
+    if err := engine.publish(context.Background(), testEvent()); err == nil { t.Fatal("mismatched duplicate event id must remain a sync failure") }
+}
+
+func TestUnrelatedConflictIsNotAcceptedAsAck(t *testing.T) {
+    server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusConflict)
+        _, _ = w.Write([]byte(`{"code":"SOME_OTHER_CONFLICT","event_id":"evt-1"}`))
+    }))
+    defer server.Close()
+    engine, err := New(nil, server.URL, "tenant-1", "secret", "dev-1", time.Second, time.Second)
+    if err != nil { t.Fatal(err) }
+    if err := engine.publish(context.Background(), testEvent()); err == nil { t.Fatal("unrelated Central conflict must not be treated as published") }
 }
 
 func TestRemoteCentralRequiresHTTPSAndCredentials(t *testing.T) {

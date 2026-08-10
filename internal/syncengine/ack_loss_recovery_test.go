@@ -67,9 +67,14 @@ func TestRefundEventRecoversWhenCentralAcceptsButAcknowledgementIsLost(t *testin
 		mu.Unlock()
 
 		if alreadyAccepted {
-			// Mirrors the production sync contract: a duplicate durable event is
-			// already committed centrally and is safe for the POS to acknowledge.
+			// Mirrors the production Central sync contract: a duplicate durable
+			// event is acknowledged explicitly with the same event identity.
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"code":     "SYNC_EVENT_ALREADY_RECEIVED",
+				"event_id": idempotencyKey,
+			})
 			return
 		}
 

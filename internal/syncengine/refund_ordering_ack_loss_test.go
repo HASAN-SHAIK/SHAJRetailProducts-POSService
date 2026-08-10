@@ -89,7 +89,12 @@ func TestRefundOrderingKeyBlocksLaterFactsUntilLostAckEventRecovers(t *testing.T
 			return
 		}
 		if alreadyAccepted {
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"code":     "SYNC_EVENT_ALREADY_RECEIVED",
+				"event_id": key,
+			})
 			return
 		}
 		w.WriteHeader(http.StatusOK)

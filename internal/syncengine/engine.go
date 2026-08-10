@@ -40,6 +40,11 @@ type Envelope struct {
     CreatedAt        string          `json:"created_at"`
 }
 
+type duplicateAck struct {
+    Code    string `json:"code"`
+    EventID string `json:"event_id"`
+}
+
 func New(service *outbox.Service, centralURL, tenantID, syncToken, deviceID string, timeout, poll time.Duration) (*Engine, error) {
     centralURL = strings.TrimSpace(centralURL)
     if centralURL == "" { return nil, nil }
@@ -101,7 +106,12 @@ func (e *Engine) publish(ctx context.Context, event outbox.Event) error {
     defer resp.Body.Close()
     limited, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<10))
     if resp.StatusCode >= 200 && resp.StatusCode < 300 { return nil }
-    if resp.StatusCode == http.StatusConflict { return nil }
+    if resp.StatusCode == http.StatusConflict {
+        var ack duplicateAck
+        if json.Unmarshal(limited, &ack) == nil && ack.Code == "SYNC_EVENT_ALREADY_RECEIVED" && ack.EventID == event.ID {
+            return nil
+        }
+    }
     return fmt.Errorf("central sync returned %d: %s", resp.StatusCode, strings.TrimSpace(string(limited)))
 }
 
