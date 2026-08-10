@@ -143,8 +143,6 @@ func TestRealCentralPartialReturnE2E(t *testing.T) {
 		t.Fatalf("local partial return compensation outbound=%d sale_returns=%d on_hand=%d", outbound, saleReturns, onHand)
 	}
 
-	// Simulate the POS process stopping after the offline refund transaction has
-	// committed but before any of its durable outbox facts are synced to Central.
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -185,17 +183,43 @@ func TestRealCentralPartialReturnE2E(t *testing.T) {
 		t.Fatalf("partial return left %d pending outbox events after restart", pending)
 	}
 
-	var partialEventID string
-	if err := db.SQL().QueryRowContext(ctx, `SELECT id FROM outbox_events WHERE aggregate_id=? AND event_type='sale.partial_returned'`, orderID).Scan(&partialEventID); err != nil {
+	var refundEventIDs []string
+	rows, err := db.SQL().QueryContext(ctx, `
+		SELECT id FROM outbox_events
+		WHERE ordering_key=? AND event_type IN ('payment.recorded','inventory.movement.recorded','sale.partial_returned')
+		ORDER BY created_at,id`, "sales_order:"+orderID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	assertRealCentralOutboxState(t, db, partialEventID, "published")
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		refundEventIDs = append(refundEventIDs, id)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(refundEventIDs) != 3 {
+		t.Fatalf("refund event chain count=%d want=3 ids=%v", len(refundEventIDs), refundEventIDs)
+	}
 
-	if _, err := db.SQL().ExecContext(ctx, `UPDATE outbox_events SET status='pending',published_at=NULL,locked_at=NULL,last_error=NULL,available_at=? WHERE id=?`, time.Now().UTC().Format(time.RFC3339Nano), partialEventID); err != nil {
-		t.Fatal(err)
+	// Model lost acknowledgements after Central has already committed all three
+	// refund facts: POS still believes each durable fact is pending and retries
+	// the exact same event identity. Central must answer with its explicit
+	// duplicate acknowledgement, and the strict sync engine may then converge
+	// each local event to published without duplicating canonical effects.
+	for _, id := range refundEventIDs {
+		if _, err := db.SQL().ExecContext(ctx, `UPDATE outbox_events SET status='pending',published_at=NULL,locked_at=NULL,last_error=NULL,available_at=? WHERE id=?`, time.Now().UTC().Format(time.RFC3339Nano), id); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if !engine.dispatchOne(ctx) {
-		t.Fatal("expected sale.partial_returned replay dispatch")
+	for i, id := range refundEventIDs {
+		if !engine.dispatchOne(ctx) {
+			t.Fatalf("expected lost-ack refund replay dispatch %d for %s", i+1, id)
+		}
+		assertRealCentralOutboxState(t, db, id, "published")
 	}
-	assertRealCentralOutboxState(t, db, partialEventID, "published")
 }
