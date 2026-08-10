@@ -8,6 +8,7 @@ on:
       - 'internal/inventory/**'
       - 'internal/outbox/**'
       - 'internal/syncengine/**'
+      - 'internal/server/**'
       - '.github/workflows/cross-repo-refund-e2e.yml'
   workflow_dispatch:
 
@@ -63,6 +64,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Certify manager-approved full-refund HTTP boundary
+        run: |
+          CGO_ENABLED=1 go test ./internal/server \
+            -run '^(TestRefundApprovalHTTPRejectsWrongActionWithoutBurningToken|TestRefundApprovalHTTPRejectsWrongOrderWithoutBurningToken)$' \
+            -count=1 -v
 
       - name: Create real master and tenant PostgreSQL databases
         run: |
