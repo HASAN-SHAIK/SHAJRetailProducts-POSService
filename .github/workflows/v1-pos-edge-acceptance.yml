@@ -52,6 +52,12 @@ jobs:
             -run '^TestGetReconciliationSnapshotIncludesRefundSyncState$' \
             -count=1 -v
 
+      - name: Certify V1 cashier refund through restart, sync, recovery, and reconciliation
+        run: |
+          CGO_ENABLED=1 go test ./internal/server ./internal/syncengine ./internal/refunds \
+            -run '^(TestManagerApprovedRefundConsumesApprovalAndSurvivesRestart|TestPartialRefundOrderScopedApprovalLifecycleAcrossRestart|TestCentralAuthorizedRecoverySurvivesRestartAndPreservesOrderHead|TestRefundEventRecoversWhenCentralAcceptsButAcknowledgementIsLost|TestV1RefundSyncLostAckRestartAndOrderingAcceptance|TestGetReconciliationSnapshotIncludesRefundSyncState)$' \
+            -count=1 -v
+
       - name: Test complete POS package suite
         run: CGO_ENABLED=1 go test ./... -count=1
 
