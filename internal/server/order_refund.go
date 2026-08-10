@@ -39,6 +39,7 @@ func (s *Server) handleOrderRefund(w http.ResponseWriter, r *http.Request) {
 	}
 	input.Reason = strings.TrimSpace(input.Reason)
 	input.ReturnID = strings.TrimSpace(input.ReturnID)
+	orderID := strings.TrimSpace(r.PathValue("id"))
 
 	partial := input.ReturnID != "" || len(input.Lines) > 0
 	partialLines := make([]refunds.PartialReturnLineInput, 0, len(input.Lines))
@@ -65,7 +66,7 @@ func (s *Server) handleOrderRefund(w http.ResponseWriter, r *http.Request) {
 	if hasLocalPermission(user, permissionPOSRefund) {
 		approverUserID = user.UserID
 	} else {
-		approval, err := s.consumeManagerApproval(r.Context(), r.Header.Get("X-POS-Approval-Token"), user.UserID, permissionPOSRefund)
+		approval, err := s.consumeManagerApprovalForOrder(r.Context(), r.Header.Get("X-POS-Approval-Token"), user.UserID, permissionPOSRefund, orderID)
 		if err != nil {
 			writeJSON(w, http.StatusForbidden, map[string]any{
 				"error": "manager_approval_required",
@@ -86,7 +87,7 @@ func (s *Server) handleOrderRefund(w http.ResponseWriter, r *http.Request) {
 	if partial {
 		order, plan, err := refundService.ReturnPartial(r.Context(), refunds.PartialReturnInput{
 			ReturnID: input.ReturnID,
-			OrderID: r.PathValue("id"),
+			OrderID: orderID,
 			ApprovedByUserID: approverUserID,
 			Reason: reason,
 			Lines: partialLines,
@@ -122,7 +123,7 @@ func (s *Server) handleOrderRefund(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	order, err := refundService.RefundFullSale(r.Context(), r.PathValue("id"), approverUserID, reason)
+	order, err := refundService.RefundFullSale(r.Context(), orderID, approverUserID, reason)
 	switch {
 	case errors.Is(err, orders.ErrNotFound):
 		writeError(w, http.StatusNotFound, "order_not_found")
