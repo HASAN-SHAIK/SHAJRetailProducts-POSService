@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
+	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/orders"
 )
 
 func TestManagerApprovalIsBoundAndSingleUse(t *testing.T) {
@@ -83,5 +84,98 @@ func TestDiscountedOrderCanUseOneTimeApproval(t *testing.T) {
 	handler(replayRes, replay)
 	if replayRes.Code != http.StatusForbidden || !strings.Contains(replayRes.Body.String(), "manager_approval_required") {
 		t.Fatalf("replayed approval status=%d body=%s", replayRes.Code, replayRes.Body.String())
+	}
+}
+
+func TestVoidApprovalWrongCashierSurvivesRestartWithoutSideEffects(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "pos.db")
+
+	db, err := database.Open(ctx, path)
+	if err != nil { t.Fatal(err) }
+	if err := db.Migrate(ctx); err != nil {
+		db.Close()
+		t.Fatalf("migrate before wrong-cashier void: %v", err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := db.SQL().ExecContext(ctx, `
+		INSERT INTO sales_orders(
+			id,client_order_id,store_id,status,currency,subtotal_minor,discount_minor,tax_minor,total_minor,
+			source,version,created_at,updated_at
+		) VALUES(?,?,?,?,?,?,?,?,?,'pos',1,?,?)`,
+		"ord-void-cashier-scope", "client-void-cashier-scope", "store-1", "confirmed", "INR", 1000, 0, 0, 1000, now, now); err != nil {
+		db.Close()
+		t.Fatalf("insert order: %v", err)
+	}
+
+	token := "void-wrong-cashier-restart-token"
+	seedSensitiveApproval(t, db, token, "cashier-1", permissionPOSVoid)
+	if _, err := db.SQL().ExecContext(ctx, `
+		UPDATE pos_manager_approvals
+		SET order_id=?
+		WHERE cashier_user_id=? AND permission=? AND consumed_at IS NULL`,
+		"ord-void-cashier-scope", "cashier-1", permissionPOSVoid); err != nil {
+		db.Close()
+		t.Fatalf("scope approval to order: %v", err)
+	}
+
+	s := &Server{db: db, orders: orders.New(db, nil)}
+	wrongCashier := LocalUserContext{UserID: "cashier-2", Permissions: []string{permissionPOSSale}}
+	wrong := httptest.NewRequest(http.MethodPost, "/api/v1/orders/ord-void-cashier-scope/void", strings.NewReader(`{"reason":"wrong cashier"}`))
+	wrong.SetPathValue("id", "ord-void-cashier-scope")
+	wrong.Header.Set("X-POS-Approval-Token", token)
+	wrong = wrong.WithContext(context.WithValue(wrong.Context(), authContextKey{}, wrongCashier))
+	wrongRes := httptest.NewRecorder()
+	s.handleOrderVoid(wrongRes, wrong)
+	if wrongRes.Code != http.StatusForbidden || !strings.Contains(wrongRes.Body.String(), "manager_approval_required") {
+		db.Close()
+		t.Fatalf("wrong-cashier void status=%d body=%s", wrongRes.Code, wrongRes.Body.String())
+	}
+
+	if err := db.Close(); err != nil { t.Fatal(err) }
+
+	reopened, err := database.Open(ctx, path)
+	if err != nil { t.Fatal(err) }
+	defer reopened.Close()
+	if err := reopened.Migrate(ctx); err != nil { t.Fatalf("migrate after restart: %v", err) }
+
+	var status string
+	var version int
+	if err := reopened.SQL().QueryRowContext(ctx, `SELECT status,version FROM sales_orders WHERE id=?`, "ord-void-cashier-scope").Scan(&status, &version); err != nil {
+		t.Fatal(err)
+	}
+	if status != "confirmed" || version != 1 {
+		t.Fatalf("wrong-cashier attempt mutated order status=%s version=%d", status, version)
+	}
+
+	var paymentFacts, inventoryFacts, syncFacts int
+	if err := reopened.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM payments WHERE order_id=?`, "ord-void-cashier-scope").Scan(&paymentFacts); err != nil { t.Fatal(err) }
+	if err := reopened.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM inventory_movements WHERE reference_id=?`, "ord-void-cashier-scope").Scan(&inventoryFacts); err != nil { t.Fatal(err) }
+	if err := reopened.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox_events WHERE aggregate_id=? OR ordering_key=?`, "ord-void-cashier-scope", "sales_order:ord-void-cashier-scope").Scan(&syncFacts); err != nil { t.Fatal(err) }
+	if paymentFacts != 0 || inventoryFacts != 0 || syncFacts != 0 {
+		t.Fatalf("wrong-cashier attempt created side effects payments=%d inventory=%d sync=%d", paymentFacts, inventoryFacts, syncFacts)
+	}
+
+	restarted := &Server{db: reopened, orders: orders.New(reopened, nil)}
+	rightfulCashier := LocalUserContext{UserID: "cashier-1", Permissions: []string{permissionPOSSale}}
+	intended := httptest.NewRequest(http.MethodPost, "/api/v1/orders/ord-void-cashier-scope/void", strings.NewReader(`{"reason":"cashier text must not override manager reason"}`))
+	intended.SetPathValue("id", "ord-void-cashier-scope")
+	intended.Header.Set("X-POS-Approval-Token", token)
+	intended = intended.WithContext(context.WithValue(intended.Context(), authContextKey{}, rightfulCashier))
+	intendedRes := httptest.NewRecorder()
+	restarted.handleOrderVoid(intendedRes, intended)
+	if intendedRes.Code != http.StatusOK {
+		t.Fatalf("rightful cashier void after restart status=%d body=%s", intendedRes.Code, intendedRes.Body.String())
+	}
+
+	if err := reopened.SQL().QueryRowContext(ctx, `SELECT status,version FROM sales_orders WHERE id=?`, "ord-void-cashier-scope").Scan(&status, &version); err != nil {
+		t.Fatal(err)
+	}
+	if status != "cancelled" || version != 2 {
+		t.Fatalf("rightful cashier did not consume preserved approval status=%s version=%d", status, version)
+	}
+	if _, err := restarted.consumeManagerApproval(ctx, token, "cashier-1", permissionPOSVoid); err == nil {
+		t.Fatal("rightful cashier void did not consume preserved one-time approval")
 	}
 }
