@@ -95,6 +95,20 @@ func TestManagerApprovedVoidConsumesApprovalAndSurvivesRestart(t *testing.T) {
 		t.Fatalf("restart facts status=%s version=%d approver=%s reason=%s", status, version, approver, reason)
 	}
 
+	var paymentFacts, inventoryFacts, syncFacts int
+	if err := reopened.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM payments WHERE order_id=?`, "ord-void-approved-restart").Scan(&paymentFacts); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM inventory_movements WHERE reference_id=?`, "ord-void-approved-restart").Scan(&inventoryFacts); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox_events WHERE aggregate_id=? OR ordering_key=?`, "ord-void-approved-restart", "sales_order:ord-void-approved-restart").Scan(&syncFacts); err != nil {
+		t.Fatal(err)
+	}
+	if paymentFacts != 0 || inventoryFacts != 0 || syncFacts != 0 {
+		t.Fatalf("pre-completion void escaped local boundary payments=%d inventory=%d sync=%d", paymentFacts, inventoryFacts, syncFacts)
+	}
+
 	restarted := &Server{db: reopened, orders: orders.New(reopened, nil)}
 	if _, err := restarted.consumeManagerApproval(ctx, token, "cashier-1", permissionPOSVoid); err == nil {
 		t.Fatal("consumed void approval became reusable after restart")
