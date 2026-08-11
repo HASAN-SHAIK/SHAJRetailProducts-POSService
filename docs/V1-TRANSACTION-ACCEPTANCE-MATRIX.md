@@ -14,7 +14,7 @@ A row is `CERTIFIED` only when there is a focused automated release signal or an
 
 | Journey / invariant | V1 status | Current release evidence | Next action if not certified |
 | --- | --- | --- | --- |
-| Normal sale | NEEDS EXPLICIT SIGNAL | Complete POS Go suite provides supporting coverage only | Identify or add focused cashier sale -> local completion -> Central convergence acceptance |
+| Normal sale | CERTIFIED | `TestOrderVerticalSlicePersistsAcrossSQLiteRestart`; Cross-repo Order E2E exact-head signal | Keep frozen unless a defect is found |
 | Offline sale | NEEDS EXPLICIT SIGNAL | Offline/outbox behavior is covered indirectly by package tests | Add explicit offline sale -> restart -> reconnect -> Central convergence acceptance |
 | Payment | NEEDS EXPLICIT SIGNAL | Supporting package coverage only | Add focused payment durability and exactly-once Central projection acceptance |
 | Receipt | NEEDS EXPLICIT SIGNAL | No explicit V1 release signal in current edge workflow | Add focused completed-sale receipt/read-model acceptance without adding authority to Frontend |
@@ -22,21 +22,21 @@ A row is `CERTIFIED` only when there is a focused automated release signal or an
 | Full refund | CERTIFIED | `TestManagerApprovedRefundConsumesApprovalAndSurvivesRestart`; Cross-repo Refund E2E | Keep frozen unless a defect is found |
 | Partial refund / return | CERTIFIED | `TestPartialRefundOrderScopedApprovalLifecycleAcrossRestart`; Cross-repo Partial Return E2E | Keep frozen unless a defect is found |
 | Manager approval | CERTIFIED | Exact scope, single-use concurrency, restart, wrong-order and wrong-cashier certifications | Freeze approval semantics unless a real defect is found |
-| Inventory effects | PARTIAL | Void no-compensation and refund/return paths are certified | Add explicit normal-sale inventory decrement/convergence signal |
-| Crash / restart | CERTIFIED | Void/refund/recovery/lost-ack restart certifications | Keep frozen unless a defect is found |
+| Inventory effects | PARTIAL | Void no-compensation and refund/return paths are certified; normal-sale local decrement is covered by the normal-sale release signal | Add explicit normal-sale Central inventory convergence signal |
+| Crash / restart | CERTIFIED | Void/refund/recovery/lost-ack restart certifications; normal-sale SQLite restart durability | Keep frozen unless a defect is found |
 | Offline -> online sync | PARTIAL | Refund lost-ack/restart/order sync is explicit | Add explicit normal-sale reconnect/convergence signal |
 | Duplicate delivery | NEEDS EXPLICIT SIGNAL | Supporting idempotency coverage exists outside this release matrix | Promote exact duplicate delivery / Central idempotency test to V1 release signal |
 | Lost acknowledgement | CERTIFIED | `TestRefundEventRecoversWhenCentralAcceptsButAcknowledgementIsLost`; `TestV1RefundSyncLostAckRestartAndOrderingAcceptance` | Keep frozen unless a defect is found |
 | Dead-letter handling | CERTIFIED | Central-authorized recovery plus reconciliation visibility | Keep frozen unless a defect is found |
 | Central-authorized recovery | CERTIFIED | `TestCentralAuthorizedRecoverySurvivesRestartAndPreservesOrderHead` | Keep Central as recovery authority |
-| Exactly-once Central convergence | PARTIAL | Refund/partial-return cross-repo E2E and lost-ack idempotency paths | Add explicit normal-sale/payment exactly-once convergence signal |
+| Exactly-once Central convergence | PARTIAL | Refund/partial-return cross-repo E2E, lost-ack idempotency paths, and normal-sale Cross-repo Order E2E | Add explicit standalone normal-sale payment/inventory convergence signal |
 | Cashier/operator status | PARTIAL | Refund reconciliation snapshot is explicit | Add Frontend -> POS operator-state acceptance for sale/sync blocked/recovered/synced states |
 
 ## Current V1 release focus
 
 Manager approval and refund/void semantics are frozen unless an actual defect is discovered. Remaining transaction-core work should proceed in this order:
 
-1. Normal sale + payment + inventory + Central convergence.
+1. Payment + inventory standalone Central convergence for a normal sale.
 2. Offline sale + SQLite restart + reconnect + durable outbox convergence.
 3. Duplicate delivery and exactly-once Central handling for the normal sale/payment path.
 4. Receipt/read-model acceptance for a completed sale.
