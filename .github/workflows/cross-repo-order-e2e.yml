@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'internal/syncengine/**'
+      - 'internal/server/order_vertical_slice_test.go'
+      - 'docs/V1-TRANSACTION-ACCEPTANCE-MATRIX.md'
       - '.github/workflows/cross-repo-order-e2e.yml'
   workflow_dispatch:
 
