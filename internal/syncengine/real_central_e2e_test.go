@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/outbox"
-	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/testutil"
 )
 
 func TestRealCentralOrderE2E(t *testing.T) {
@@ -21,10 +21,17 @@ func TestRealCentralOrderE2E(t *testing.T) {
 	tenantID := envOr("POS_E2E_TENANT_ID", "tenant-e2e")
 	syncToken := envOr("POS_E2E_SYNC_TOKEN", "sync-secret")
 	deviceID := envOr("POS_E2E_DEVICE_ID", "device-e2e")
-
-	db := testutil.OpenDatabase(t)
-	service := outbox.New(db)
 	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "pos-real-central-e2e.db")
+	db, err := database.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("open POS database: %v", err)
+	}
+	if err := db.Migrate(ctx); err != nil {
+		_ = db.Close()
+		t.Fatalf("migrate POS database: %v", err)
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	eventID := "evt-cross-repo-order-e2e"
 	orderID := "ord-cross-repo-e2e"
@@ -110,15 +117,30 @@ func TestRealCentralOrderE2E(t *testing.T) {
 		eventID, "sales_order", orderID, 2, "sale.completed", 1, "sales_order:"+orderID,
 		string(payloadJSON), string(metadataJSON), now, now)
 	if err != nil {
+		_ = db.Close()
 		t.Fatal(err)
 	}
+
+	// The sale/outbox fact is committed while the POS is offline. Simulate a
+	// process/device restart before Central is reachable, then rebuild the real
+	// outbox service and sync engine from the same SQLite file.
+	if err := db.Close(); err != nil {
+		t.Fatalf("close POS database before restart: %v", err)
+	}
+	db, err = database.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("reopen POS database after restart: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	service := outbox.New(db)
+	assertRealCentralOutboxState(t, db, eventID, "pending")
 
 	engine, err := New(service, centralURL, tenantID, syncToken, deviceID, 5*time.Second, 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !engine.dispatchOne(ctx) {
-		t.Fatal("expected first dispatch to process the outbox event")
+		t.Fatal("expected reconnect dispatch to process the restarted outbox event")
 	}
 	assertRealCentralOutboxState(t, db, eventID, "published")
 
