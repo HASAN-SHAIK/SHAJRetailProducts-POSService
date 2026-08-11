@@ -15,9 +15,9 @@ A row is `CERTIFIED` only when there is a focused automated release signal or an
 | Journey / invariant | V1 status | Current release evidence | Next action if not certified |
 | --- | --- | --- | --- |
 | Normal sale | CERTIFIED | `TestOrderVerticalSlicePersistsAcrossSQLiteRestart`; Cross-repo Order E2E exact-head signal | Keep frozen unless a defect is found |
-| Offline sale | CERTIFIED | Local sale/outbox durability is proven by `TestOrderVerticalSlicePersistsAcrossSQLiteRestart`; Cross-repo Order E2E now closes/reopens the committed POS SQLite file before reconnect and Central dispatch | Keep frozen unless a defect is found |
+| Offline sale | CERTIFIED | Local sale/outbox durability is proven by `TestOrderVerticalSlicePersistsAcrossSQLiteRestart`; Cross-repo Order E2E closes/reopens the committed POS SQLite file before reconnect and Central dispatch | Keep frozen unless a defect is found |
 | Payment | CERTIFIED | Cross-repo Order E2E dispatches the real POS outbox through the production Central sync route and asserts exactly one `pos_sale_payments` projection after replay | Keep frozen unless a defect is found |
-| Receipt | NEEDS EXPLICIT SIGNAL | Cross-repo Order E2E proves canonical receipt projection, but operator/read-model acceptance is not yet explicit | Add focused completed-sale receipt/read-model acceptance without adding authority to Frontend |
+| Receipt | CERTIFIED | `TestCompletedSaleCommitsReceiptInventoryAndOutboxTogether` proves the completion response and POS receipt read model expose the same immutable receipt number/hash; Cross-repo Receipt E2E proves durable independent Central delivery and idempotent replay | Keep frozen unless a defect is found |
 | Pre-completion void | CERTIFIED | `TestManagerApprovedVoidConsumesApprovalAndSurvivesRestart`; V1 edge acceptance | Keep frozen unless a defect is found |
 | Full refund | CERTIFIED | `TestManagerApprovedRefundConsumesApprovalAndSurvivesRestart`; Cross-repo Refund E2E | Keep frozen unless a defect is found |
 | Partial refund / return | CERTIFIED | `TestPartialRefundOrderScopedApprovalLifecycleAcrossRestart`; Cross-repo Partial Return E2E | Keep frozen unless a defect is found |
@@ -36,8 +36,7 @@ A row is `CERTIFIED` only when there is a focused automated release signal or an
 
 Manager approval and refund/void semantics are frozen unless an actual defect is discovered. Remaining transaction-core work should proceed in this order:
 
-1. Receipt/read-model acceptance for a completed sale.
-2. Frontend operator-visible local/sync/recovery states.
-3. Final cross-repository transaction-core certification.
+1. Frontend operator-visible local/sync/recovery states.
+2. Final cross-repository transaction-core certification.
 
 When all rows are `CERTIFIED`, the transaction core is release-certified and work should move to the next V1 Retail OS domain rather than expanding manager-approval micro-tests.
