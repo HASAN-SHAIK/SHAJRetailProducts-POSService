@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'internal/**'
+      - 'docs/V1-TRANSACTION-ACCEPTANCE-MATRIX.md'
       - '.github/workflows/v1-pos-edge-acceptance.yml'
   workflow_dispatch:
 
