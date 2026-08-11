@@ -60,6 +60,27 @@ func TestCompletedSaleCommitsReceiptInventoryAndOutboxTogether(t *testing.T) {
     app.httpServer.Handler.ServeHTTP(res, req)
     if res.Code != http.StatusOK { t.Fatalf("complete status=%d body=%s", res.Code, res.Body.String()) }
 
+    var completion struct {
+        Order orders.Order `json:"order"`
+        Receipt receipts.Receipt `json:"receipt"`
+    }
+    if err := json.Unmarshal(res.Body.Bytes(), &completion); err != nil { t.Fatalf("decode completion response: %v", err) }
+    if completion.Order.ID != order.ID { t.Fatalf("completion order id=%q want=%q", completion.Order.ID, order.ID) }
+    if completion.Receipt.ID == "" { t.Fatal("completion response did not expose the immutable receipt") }
+    if completion.Receipt.OrderID != order.ID { t.Fatalf("completion receipt order id=%q want=%q", completion.Receipt.OrderID, order.ID) }
+
+    receiptReq := httptest.NewRequest(http.MethodGet, "/api/v1/orders/"+order.ID+"/receipt", nil)
+    receiptRes := httptest.NewRecorder()
+    app.httpServer.Handler.ServeHTTP(receiptRes, receiptReq)
+    if receiptRes.Code != http.StatusOK { t.Fatalf("receipt status=%d body=%s", receiptRes.Code, receiptRes.Body.String()) }
+
+    var readModel receipts.Receipt
+    if err := json.Unmarshal(receiptRes.Body.Bytes(), &readModel); err != nil { t.Fatalf("decode receipt read model: %v", err) }
+    if readModel.ID != completion.Receipt.ID { t.Fatalf("receipt read model id=%q want=%q", readModel.ID, completion.Receipt.ID) }
+    if readModel.OrderID != order.ID { t.Fatalf("receipt read model order id=%q want=%q", readModel.OrderID, order.ID) }
+    if readModel.ReceiptNumber != completion.Receipt.ReceiptNumber { t.Fatalf("receipt number changed between completion and read model: %q != %q", readModel.ReceiptNumber, completion.Receipt.ReceiptNumber) }
+    if readModel.SnapshotSHA256 != completion.Receipt.SnapshotSHA256 { t.Fatalf("receipt hash changed between completion and read model: %q != %q", readModel.SnapshotSHA256, completion.Receipt.SnapshotSHA256) }
+
     var completedAt string
     if err := db.SQL().QueryRow(`SELECT completed_at FROM sales_orders WHERE id=?`, order.ID).Scan(&completedAt); err != nil { t.Fatal(err) }
     if completedAt == "" { t.Fatal("order was not completed") }
