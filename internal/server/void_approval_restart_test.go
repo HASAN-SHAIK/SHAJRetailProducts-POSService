@@ -131,4 +131,17 @@ func TestManagerApprovedVoidConsumesApprovalAndSurvivesRestart(t *testing.T) {
 	if versionAfterReplay != 2 {
 		t.Fatalf("replayed HTTP void changed order version=%d want=2", versionAfterReplay)
 	}
+
+	if err := reopened.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM payments WHERE order_id=?`, "ord-void-approved-restart").Scan(&paymentFacts); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM inventory_movements WHERE reference_id=?`, "ord-void-approved-restart").Scan(&inventoryFacts); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM outbox_events WHERE aggregate_id=? OR ordering_key=?`, "ord-void-approved-restart", "sales_order:ord-void-approved-restart").Scan(&syncFacts); err != nil {
+		t.Fatal(err)
+	}
+	if paymentFacts != 0 || inventoryFacts != 0 || syncFacts != 0 {
+		t.Fatalf("rejected restarted void replay created side effects payments=%d inventory=%d sync=%d", paymentFacts, inventoryFacts, syncFacts)
+	}
 }
