@@ -30,13 +30,12 @@ A row is `CERTIFIED` only when there is a focused automated release signal or an
 | Dead-letter handling | CERTIFIED | Central-authorized recovery plus reconciliation visibility | Keep frozen unless a defect is found |
 | Central-authorized recovery | CERTIFIED | `TestCentralAuthorizedRecoverySurvivesRestartAndPreservesOrderHead` | Keep Central as recovery authority |
 | Exactly-once Central convergence | CERTIFIED | Normal-sale Cross-repo Order E2E asserts one processed sync event plus one sale, payment, receipt, inventory movement, and canonical order after replay; refund/partial-return cross-repo E2E and lost-ack paths provide additional coverage | Keep frozen unless a defect is found |
-| Cashier/operator status | PARTIAL | Refund reconciliation snapshot is explicit | Add Frontend -> POS operator-state acceptance for sale/sync blocked/recovered/synced states |
+| Cashier/operator status | CERTIFIED | Frontend PR #37 exact-head `V1 transaction sync status` gate proves the selected-order drawer renders the read-only POS reconciliation state for the exact `drawerOrder.id`; POS reconciliation derives pending/synced/blocked from durable outbox facts; blocked recovery remains Central-authorized | Keep frozen unless a defect is found |
 
-## Current V1 release focus
+## Transaction Core V1 release candidate
 
-Manager approval and refund/void semantics are frozen unless an actual defect is discovered. Remaining transaction-core work should proceed in this order:
+All authoritative transaction rows are now `CERTIFIED`.
 
-1. Frontend operator-visible local/sync/recovery states.
-2. Final cross-repository transaction-core certification.
+The release candidate must still pass the matrix-triggered exact-head `V1 POS edge acceptance` and `Cross-repo Order E2E` signals before this matrix update can merge. The other transaction journeys retain their previously green exact-head cross-repository evidence because this release-candidate change is documentation-only and does not alter POS, Backend, or Frontend runtime code.
 
-When all rows are `CERTIFIED`, the transaction core is release-certified and work should move to the next V1 Retail OS domain rather than expanding manager-approval micro-tests.
+When those final signals are green and the PR is mergeable/review-clean, the V1 transaction core is release-certified. Transaction semantics are then frozen except for real defects, and engineering moves to the next V1 Retail OS domain: Inventory.
