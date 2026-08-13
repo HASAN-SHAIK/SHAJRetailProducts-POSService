@@ -1,0 +1,164 @@
+name: Cross-repo Inventory E2E
+
+on:
+  pull_request:
+    paths:
+      - 'internal/syncengine/real_inventory_central_e2e_test.go'
+      - '.github/workflows/cross-repo-inventory-e2e.yml'
+      - 'docs/V1_INVENTORY_ACCEPTANCE_MATRIX.md'
+
+jobs:
+  inventory-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGPASSWORD: postgres
+      MASTER_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/masterdb
+      TENANT_DATABASE_URL_TEMPLATE: postgres://postgres:postgres@127.0.0.1:5432/{db}
+      DB_SSL: 'false'
+      POS_SYNC_TENANT_ID: tenant-e2e
+      POS_SYNC_TOKEN: sync-secret
+      POS_E2E_CENTRAL_URL: http://127.0.0.1:5001
+      POS_E2E_TENANT_ID: tenant-e2e
+      POS_E2E_SYNC_TOKEN: sync-secret
+      POS_E2E_DEVICE_ID: device-e2e
+
+    steps:
+      - name: Checkout POS Service
+        uses: actions/checkout@v4
+
+      - name: Checkout Backend main
+        uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Backend
+          ref: main
+          path: backend
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Create real master and tenant PostgreSQL databases
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE DATABASE masterdb;
+          CREATE DATABASE tenant_e2e;
+          SQL
+
+          psql -h 127.0.0.1 -U postgres -d masterdb -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE tenants (
+            id TEXT PRIMARY KEY,
+            shop_name TEXT,
+            owner_name TEXT,
+            email TEXT,
+            mobile TEXT,
+            plan_type TEXT,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            addons JSONB NOT NULL DEFAULT '{}'::jsonb,
+            gst_mode TEXT,
+            database_name TEXT NOT NULL
+          );
+          INSERT INTO tenants(id,shop_name,owner_name,email,mobile,plan_type,is_active,addons,gst_mode,database_name)
+          VALUES('tenant-e2e','E2E Shop','E2E Owner','e2e@example.test','0000000000','pro',TRUE,'{}'::jsonb,'INCLUSIVE','tenant_e2e');
+          SQL
+
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE products (
+            id BIGINT PRIMARY KEY,
+            stock_quantity NUMERIC(14,3) NOT NULL DEFAULT 0,
+            is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          INSERT INTO products(id,stock_quantity,is_deleted) VALUES(101,5.000,FALSE);
+          SQL
+
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-sync-events.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-sale-projections.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-inventory-movement-recorded.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-13-pos-inventory-canonical-application.sql
+
+      - name: Install backend runtime dependencies
+        working-directory: backend
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Start production POS sync route against PostgreSQL
+        run: |
+          cat > backend/e2e-pos-sync-server.js <<'NODE'
+          const express = require('express');
+          const router = require('./src/api/v1/modules/sync/posSync.routes');
+          const app = express();
+          app.use(express.json({ limit: '5mb' }));
+          app.use('/api/v1/sync', router);
+          app.use((error, req, res, next) => {
+            console.error(error);
+            res.status(500).json({ code: error.code || 'E2E_SERVER_ERROR', message: error.message });
+          });
+          const server = app.listen(5001, '127.0.0.1');
+          const shutdown = () => server.close(() => process.exit(0));
+          process.on('SIGTERM', shutdown);
+          process.on('SIGINT', shutdown);
+          NODE
+
+          node backend/e2e-pos-sync-server.js >/tmp/pos-central-inventory-e2e.log 2>&1 &
+          echo $! >/tmp/pos-central-inventory-e2e.pid
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:5001/api/v1/sync/events || true)
+            if [ "$code" = "401" ]; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/pos-central-inventory-e2e.log
+          exit 1
+
+      - name: Dispatch restarted SQLite inventory outbox and replay
+        run: CGO_ENABLED=1 go test ./internal/syncengine -run '^TestRealCentralInventoryConvergenceE2E$' -count=1 -v
+
+      - name: Verify exactly-once canonical PostgreSQL inventory
+        run: |
+          stock=$(psql -h 127.0.0.1 -U postgres -d tenant_e2e -At -v ON_ERROR_STOP=1 -c "SELECT stock_quantity FROM products WHERE id=101")
+          if [ "$stock" != "4.000" ]; then
+            echo "canonical stock expected 4.000 after one -1000 milli movement, got $stock"
+            exit 1
+          fi
+          count=$(psql -h 127.0.0.1 -U postgres -d tenant_e2e -At -v ON_ERROR_STOP=1 -c "SELECT COUNT(*) FROM pos_inventory_movements WHERE product_id='101' AND canonical_applied_at IS NOT NULL")
+          if [ "$count" != "1" ]; then
+            echo "expected exactly one canonically applied inventory movement, got $count"
+            exit 1
+          fi
+          events=$(psql -h 127.0.0.1 -U postgres -d tenant_e2e -At -v ON_ERROR_STOP=1 -c "SELECT COUNT(*) FROM pos_sync_events WHERE event_type='inventory.movement.recorded' AND processed_at IS NOT NULL")
+          if [ "$events" != "1" ]; then
+            echo "expected exactly one processed Central inventory sync event, got $events"
+            exit 1
+          fi
+
+      - name: Show backend log on failure
+        if: failure()
+        run: cat /tmp/pos-central-inventory-e2e.log || true
+
+      - name: Stop E2E backend
+        if: always()
+        run: |
+          if [ -f /tmp/pos-central-inventory-e2e.pid ]; then kill "$(cat /tmp/pos-central-inventory-e2e.pid)" || true; fi

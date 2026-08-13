@@ -51,19 +51,19 @@ func TestRealCentralPartialReturnE2E(t *testing.T) {
 	managerID := "manager-partial-return-e2e"
 	reason := "customer returned one quarter"
 
-	if _, err := db.SQL().ExecContext(ctx, `INSERT INTO catalog_products(id,name,unit_of_measure,is_active,allow_manual_price,track_inventory,version,updated_at) VALUES('product-partial-return-e2e','Partial Return E2E Product','unit',1,0,1,1,?)`, now); err != nil {
+	if _, err := db.SQL().ExecContext(ctx, `INSERT INTO catalog_products(id,name,unit_of_measure,is_active,allow_manual_price,track_inventory,version,updated_at) VALUES('102','Partial Return E2E Product','unit',1,0,1,1,?)`, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.SQL().ExecContext(ctx, `INSERT INTO sales_orders(id,client_order_id,store_id,terminal_id,status,currency,subtotal_minor,discount_minor,tax_minor,total_minor,source,version,completed_at,created_at,updated_at) VALUES(?,?,?,?,'paid','INR',10000,0,0,10000,'pos',2,?,?,?)`, orderID, "client-partial-return-cross-repo-e2e", "store-e2e", "terminal-e2e", now, now, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.SQL().ExecContext(ctx, `INSERT INTO sales_order_items(id,order_id,line_no,product_id,product_name,quantity_milli,unit_price_minor,discount_minor,tax_minor,line_total_minor,created_at) VALUES(?,?,1,'product-partial-return-e2e','Partial Return E2E Product',1000,10000,0,0,10000,?)`, itemID, orderID, now); err != nil {
+	if _, err := db.SQL().ExecContext(ctx, `INSERT INTO sales_order_items(id,order_id,line_no,product_id,product_name,quantity_milli,unit_price_minor,discount_minor,tax_minor,line_total_minor,created_at) VALUES(?,?,1,'102','Partial Return E2E Product',1000,10000,0,0,10000,?)`, itemID, orderID, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.SQL().ExecContext(ctx, `INSERT INTO inventory_balances(store_id,product_id,on_hand_milli,reserved_milli,version,updated_at) VALUES('store-e2e','product-partial-return-e2e',4000,0,2,?)`, now); err != nil {
+	if _, err := db.SQL().ExecContext(ctx, `INSERT INTO inventory_balances(store_id,product_id,on_hand_milli,reserved_milli,version,updated_at) VALUES('store-e2e','102',4000,0,2,?)`, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.SQL().ExecContext(ctx, `INSERT INTO inventory_movements(id,store_id,product_id,movement_type,quantity_delta_milli,reference_type,reference_id,order_item_id,balance_after_milli,occurred_at,created_at) VALUES('issue-partial-return-cross-repo-e2e','store-e2e','product-partial-return-e2e','sale_issue',-1000,'sale_order',?,?,4000,?,?)`, orderID, itemID, now, now); err != nil {
+	if _, err := db.SQL().ExecContext(ctx, `INSERT INTO inventory_movements(id,store_id,product_id,movement_type,quantity_delta_milli,reference_type,reference_id,order_item_id,balance_after_milli,occurred_at,created_at) VALUES('issue-partial-return-cross-repo-e2e','store-e2e','102','sale_issue',-1000,'sale_order',?,?,4000,?,?)`, orderID, itemID, now, now); err != nil {
 		t.Fatal(err)
 	}
 
@@ -81,7 +81,7 @@ func TestRealCentralPartialReturnE2E(t *testing.T) {
 			"id": orderID, "client_order_id": "client-partial-return-cross-repo-e2e", "store_id": "store-e2e", "terminal_id": "terminal-e2e",
 			"status": "paid", "currency": "INR", "subtotal_minor": 10000, "discount_minor": 0, "tax_minor": 0, "total_minor": 10000,
 			"version": 2, "completed_at": now, "created_at": now, "updated_at": now,
-			"items": []map[string]any{{"id": itemID, "line_no": 1, "product_id": "product-partial-return-e2e", "product_name": "Partial Return E2E Product", "quantity_milli": 1000, "unit_price_minor": 10000, "discount_minor": 0, "tax_minor": 0, "line_total_minor": 10000}},
+			"items": []map[string]any{{"id": itemID, "line_no": 1, "product_id": "102", "product_name": "Partial Return E2E Product", "quantity_milli": 1000, "unit_price_minor": 10000, "discount_minor": 0, "tax_minor": 0, "line_total_minor": 10000}},
 		},
 		"payments": []map[string]any{{"id": capture.ID, "client_payment_id": capture.ClientPaymentID, "mode": capture.Mode, "direction": "in", "amount_minor": 10000, "currency": "INR", "status": "captured", "created_at": now}},
 		"receipt": map[string]any{
@@ -89,7 +89,7 @@ func TestRealCentralPartialReturnE2E(t *testing.T) {
 			"currency": "INR", "total_minor": 10000, "paid_minor": 10000, "balance_minor": 0,
 			"snapshot": map[string]any{"order_id": orderID}, "snapshot_sha256": "partial-return-e2e-snapshot-sha", "issued_at": now,
 		},
-		"inventory_movements": []map[string]any{{"id": "issue-partial-return-cross-repo-e2e", "store_id": "store-e2e", "product_id": "product-partial-return-e2e", "movement_type": "sale_issue", "quantity_delta_milli": -1000, "reference_type": "sale_order", "reference_id": orderID, "order_item_id": itemID, "balance_after_milli": 4000, "occurred_at": now}},
+		"inventory_movements": []map[string]any{{"id": "issue-partial-return-cross-repo-e2e", "store_id": "store-e2e", "product_id": "102", "movement_type": "sale_issue", "quantity_delta_milli": -1000, "reference_type": "sale_order", "reference_id": orderID, "order_item_id": itemID, "balance_after_milli": 4000, "occurred_at": now}},
 	}
 	payloadJSON, err := json.Marshal(completedPayload)
 	if err != nil {
@@ -136,7 +136,7 @@ func TestRealCentralPartialReturnE2E(t *testing.T) {
 	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM inventory_movements WHERE order_item_id=? AND movement_type='sale_return' AND quantity_delta_milli=250`, itemID).Scan(&saleReturns); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.SQL().QueryRowContext(ctx, `SELECT on_hand_milli FROM inventory_balances WHERE store_id='store-e2e' AND product_id='product-partial-return-e2e'`).Scan(&onHand); err != nil {
+	if err := db.SQL().QueryRowContext(ctx, `SELECT on_hand_milli FROM inventory_balances WHERE store_id='store-e2e' AND product_id='102'`).Scan(&onHand); err != nil {
 		t.Fatal(err)
 	}
 	if outbound != 1 || saleReturns != 1 || onHand != 4250 {

@@ -118,12 +118,21 @@ jobs:
             discount_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
             gst_percent NUMERIC(8,3) NOT NULL DEFAULT 0
           );
+          CREATE TABLE products (
+            id BIGINT PRIMARY KEY,
+            stock_quantity NUMERIC(14,3) NOT NULL DEFAULT 0,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            is_deleted BOOLEAN NOT NULL DEFAULT FALSE
+          );
+          INSERT INTO products(id, stock_quantity, updated_at, is_deleted)
+          VALUES(101, 4.000, NOW(), FALSE);
           SQL
 
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-sync-events.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-sale-projections.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-payment-recorded.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-inventory-movement-recorded.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-13-pos-inventory-canonical-application.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-08-canonical-pos-orders.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-08-pos-cashier-audit.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-09-pos-sale-returned.sql
@@ -187,6 +196,7 @@ jobs:
           assert_one "SELECT COUNT(*) FROM pos_sales WHERE order_id='ord-refund-cross-repo-e2e' AND status='returned' AND version=4" "compatibility returned sale"
           assert_one "SELECT COUNT(*) FROM pos_sale_payments WHERE order_id='ord-refund-cross-repo-e2e' AND direction='out' AND status='refunded' AND amount_minor=10000" "central payment reversal"
           assert_one "SELECT COUNT(*) FROM pos_inventory_movements WHERE order_id='ord-refund-cross-repo-e2e' AND movement_type='sale_return' AND quantity_delta_milli=1000" "central inventory restoration"
+          assert_one "SELECT COUNT(*) FROM products WHERE id=101 AND stock_quantity=5.000" "canonical product stock restoration"
 
       - name: Show backend log on failure
         if: failure()
