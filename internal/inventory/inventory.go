@@ -11,6 +11,8 @@ import (
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/orders"
 )
 
+var ErrInsufficientInventory = errors.New("insufficient inventory")
+
 type Service struct{ db *database.DB }
 
 func New(db *database.DB) *Service { return &Service{db: db} }
@@ -58,10 +60,16 @@ func (s *Service) ApplySaleTx(ctx context.Context, tx *sql.Tx, order orders.Orde
             VALUES(?,?,0,0,1,?)
             ON CONFLICT(store_id,product_id) DO NOTHING`, order.StoreID, item.ProductID, now); err != nil { return err }
 
-        if _, err := tx.ExecContext(ctx, `
+        result, err := tx.ExecContext(ctx, `
             UPDATE inventory_balances
             SET on_hand_milli=on_hand_milli-?, version=version+1, updated_at=?
-            WHERE store_id=? AND product_id=?`, item.QuantityMilli, now, order.StoreID, item.ProductID); err != nil { return err }
+            WHERE store_id=? AND product_id=? AND on_hand_milli>=?`, item.QuantityMilli, now, order.StoreID, item.ProductID, item.QuantityMilli)
+        if err != nil { return err }
+        affected, err := result.RowsAffected()
+        if err != nil { return err }
+        if affected != 1 {
+            return fmt.Errorf("%w: store=%s product=%s requested_milli=%d", ErrInsufficientInventory, order.StoreID, item.ProductID, item.QuantityMilli)
+        }
 
         var after int64
         if err := tx.QueryRowContext(ctx, `SELECT on_hand_milli FROM inventory_balances WHERE store_id=? AND product_id=?`, order.StoreID, item.ProductID).Scan(&after); err != nil { return err }
