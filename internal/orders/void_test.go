@@ -53,6 +53,16 @@ func TestVoidWithCancelsUncompletedUnpaidOrderAndRecordsApproval(t *testing.T) {
 	if status != "cancelled" || version != 2 || approver != "manager-1" || reason != "customer changed mind" {
 		t.Fatalf("audit mismatch status=%s version=%d approver=%s reason=%s", status, version, approver, reason)
 	}
+
+	var movementCount int
+	if err := db.SQL().QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM inventory_movements WHERE reference_type='sale_order' AND reference_id=?`,
+		"ord-void").Scan(&movementCount); err != nil {
+		t.Fatal(err)
+	}
+	if movementCount != 0 {
+		t.Fatalf("pre-completion void created inventory movements: %d", movementCount)
+	}
 }
 
 func TestVoidWithRejectsCompletedSaleAsRefundRequired(t *testing.T) {
