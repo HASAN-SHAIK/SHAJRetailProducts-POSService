@@ -18,6 +18,7 @@
 - Sync diagnostics expose pending/failed/dead-letter outbox events with event identity, ordering key, attempts, last error, payload, and metadata; focused inventory acceptance verifies poison inventory events remain operator/support-visible.
 - Central-authorized recovery is single-use, audited, ordering-aware, and cannot be replayed after consumption; POS/Frontend do not gain force-correction authority.
 - The merged cross-repository inventory acceptance covers SQLite persistence across restart, durable outbox reconnect, duplicate delivery, lost acknowledgement, and canonical PostgreSQL convergence.
+- POSService #141 explicitly certifies the V1 provisional-negative policy: without an authoritative Central inventory initialization marker, POS must not reject a tracked sale solely because local stock truth is absent/stale. The edge records the provisional negative balance, immutable sale movement, and durable inventory outbox fact for Central convergence.
 
 ### Central
 
@@ -48,7 +49,7 @@
 | Inventory audit history | Central exposes durable reason/source/reference for purchase, sale, refund/return, and administrative adjustment | PARTIAL — purchase and manual-adjustment audit context are acceptance-certified; unified sale/refund audit mapping still needs acceptance |
 | Manual adjustment | Authorized Central operation records reason/actor and updates canonical stock atomically | CERTIFIED — Backend #27 provides the Central/admin-only audited adjustment path with atomic canonical/batch mutation, rollback, branch/batch scope, and negative-stock rejection |
 | Store/branch isolation | Inventory mutation/read cannot cross tenant or branch/store authority boundary | CERTIFIED — existing mutation paths enforce branch ownership and Backend #28 fixes/acceptance-certifies restricted stock reads while preserving privileged explicit/all-branch behavior |
-| Negative stock / oversell | V1 policy is explicit and consistently enforced online/offline; no accidental policy emerges from implementation | GAP — policy/acceptance not yet explicit |
+| Negative stock / oversell | V1 policy is explicit and consistently enforced online/offline; no accidental policy emerges from implementation | CERTIFIED — POSService #141 makes the existing architecture explicit: when POS has no authoritative initialized stock truth, tracked sales may create a provisional negative local balance online/offline, but the sale movement and durable outbox fact are mandatory so Central remains canonical and reconciliation can surface divergence; hard edge blocking is deferred until authoritative Central -> POS inventory initialization exists |
 | Batch inventory | Batch-enabled products reconcile product total and batch remaining quantity across receiving/sale/return | PARTIAL — receiving support is certified; end-to-end sale/return reconciliation acceptance required |
 | Cashier/operator visibility | Cashier can distinguish local available stock, pending Central convergence, blocked sync, and recovered/synced state where relevant | NEEDS ACCEPTANCE |
 | Reconciliation | Support/admin can compare POS movement IDs/balances with Central canonical facts and identify divergence | GAP |
@@ -62,8 +63,7 @@ No additional manager-approval semantics should be added unless inventory accept
 ## Ordered implementation priorities
 
 1. Certify batch reconciliation across receiving, sale, full refund, and partial return.
-2. Make negative-stock/oversell policy explicit and test the same policy online/offline.
-3. Add cashier/operator and support reconciliation visibility, and close the remaining unified audit mapping.
-4. Run final Inventory V1 release certification and freeze the domain except for defects.
+2. Add cashier/operator and support reconciliation visibility, and close the remaining unified audit mapping.
+3. Run final Inventory V1 release certification and freeze the domain except for defects.
 
 Transaction Core V1 is frozen except for defects discovered by this matrix.
