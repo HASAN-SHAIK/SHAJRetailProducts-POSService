@@ -14,6 +14,9 @@
 - `internal/inventory/inventory.go` maintains per-store balances and append-only movement rows.
 - Sale completion issues a `sale_issue` movement once per order item and appends an inventory outbox event in the same SQLite transaction.
 - Full refund and partial return implementations restore inventory with focused tests.
+- Pre-completion void acceptance proves an unpaid order can be cancelled without creating any inventory movement.
+- Sync diagnostics expose pending/failed/dead-letter outbox events with event identity, ordering key, attempts, last error, payload, and metadata; focused inventory acceptance verifies poison inventory events remain operator/support-visible.
+- Central-authorized recovery is single-use, audited, ordering-aware, and cannot be replayed after consumption; POS/Frontend do not gain force-correction authority.
 - The merged cross-repository inventory acceptance covers SQLite persistence across restart, durable outbox reconnect, duplicate delivery, lost acknowledgement, and canonical PostgreSQL convergence.
 
 ### Central
@@ -33,12 +36,12 @@
 | Offline sale | POS can decrement local stock while Central is unreachable and later converge without duplicate decrement | CERTIFIED — restart/reconnect acceptance proves durable local decrement and later canonical convergence |
 | Full refund restoration | POS restoration and Central canonical stock converge exactly once | CERTIFIED — full-refund E2E asserts Central stock restoration after durable refund/inventory replay |
 | Partial refund/return restoration | Only returned quantity is restored locally and centrally, exactly once | CERTIFIED — partial-return E2E asserts only returned quantity is restored in PostgreSQL |
-| Pre-completion void | No completed inventory issue survives a void before completion | NEEDS ACCEPTANCE |
+| Pre-completion void | No completed inventory issue survives a void before completion | CERTIFIED — focused void acceptance asserts zero inventory movements for a valid unpaid pre-completion void |
 | Duplicate delivery | Replayed inventory event cannot apply a second stock delta | CERTIFIED — immutable movement identity plus canonical application marker prevents duplicate effect |
 | Lost acknowledgement | Central commit followed by lost acknowledgement/retry still results in one canonical delta | CERTIFIED — cross-repo inventory/refund acceptance replays after committed-but-unacknowledged delivery and asserts one canonical effect |
 | Crash/restart | SQLite balance, movement, and pending outbox survive restart and resume convergence | CERTIFIED — inventory E2E restarts POSService before reconnect and proves durable continuation |
-| Dead-letter | Poison inventory event is visible and cannot be silently discarded | NEEDS ACCEPTANCE |
-| Central-authorized recovery | Replay/skip/recovery decisions remain Central-authorized; no Frontend/POS force-correction authority | NEEDS ACCEPTANCE |
+| Dead-letter | Poison inventory event is visible and cannot be silently discarded | CERTIFIED — sync diagnostics retain dead-letter inventory identity, ordering key, attempts, error, payload, and metadata; ordering logic blocks later same-key events rather than silently skipping the poison event |
+| Central-authorized recovery | Replay/skip/recovery decisions remain Central-authorized; no Frontend/POS force-correction authority | CERTIFIED — existing recovery acceptance proves single-use Central authorization, durable audit, ordering safety, and replay rejection |
 | Exactly-once convergence | Local movement set and Central canonical movement set converge to one logical effect per movement id | CERTIFIED — movement id is immutable and `canonical_applied_at` gates canonical stock mutation exactly once |
 | Inventory audit history | Central exposes durable reason/source/reference for purchase, sale, refund/return, and administrative adjustment | PARTIAL — POS movement history is durable; Central purchase/adjustment audit mapping still needs acceptance |
 | Manual adjustment | Authorized Central operation records reason/actor and updates canonical stock atomically | NEEDS ACCEPTANCE |
@@ -56,10 +59,9 @@ No additional manager-approval semantics should be added unless inventory accept
 
 ## Ordered implementation priorities
 
-1. Certify pre-completion void, poison/dead-letter visibility, and Central-authorized recovery without expanding transaction semantics.
-2. Certify purchase receiving, manual adjustment/audit, branch/store isolation, and batch reconciliation.
-3. Make negative-stock/oversell policy explicit and test the same policy online/offline.
-4. Add cashier/operator and support reconciliation visibility.
-5. Run final Inventory V1 release certification and freeze the domain except for defects.
+1. Certify purchase receiving, manual adjustment/audit, branch/store isolation, and batch reconciliation.
+2. Make negative-stock/oversell policy explicit and test the same policy online/offline.
+3. Add cashier/operator and support reconciliation visibility.
+4. Run final Inventory V1 release certification and freeze the domain except for defects.
 
 Transaction Core V1 is frozen except for defects discovered by this matrix.
