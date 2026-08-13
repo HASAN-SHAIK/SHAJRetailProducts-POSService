@@ -1,0 +1,48 @@
+name: V1 inventory Go fixture patch
+
+on:
+  push:
+    branches:
+      - v1/inventory-central-convergence-e2e
+    paths:
+      - '.github/workflows/v1-inventory-go-fixture-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v1/inventory-central-convergence-e2e
+          fetch-depth: 0
+      - name: Align POS refund fixtures to canonical product IDs
+        shell: python
+        run: |
+          from pathlib import Path
+          replacements = {
+              Path('internal/syncengine/real_refund_e2e_test.go'): ('product-refund-e2e', '101'),
+              Path('internal/syncengine/real_partial_return_e2e_test.go'): ('product-partial-return-e2e', '102'),
+          }
+          for path, (old, new) in replacements.items():
+              text = path.read_text()
+              if old not in text:
+                  raise SystemExit(f'{path}: expected {old!r}')
+              path.write_text(text.replace(old, new))
+      - name: Validate focused diff
+        run: |
+          set -euo pipefail
+          ! grep -q 'product-refund-e2e' internal/syncengine/real_refund_e2e_test.go
+          ! grep -q 'product-partial-return-e2e' internal/syncengine/real_partial_return_e2e_test.go
+          git diff --check
+          test "$(git diff --name-only | sort)" = "$(printf '%s\n' internal/syncengine/real_partial_return_e2e_test.go internal/syncengine/real_refund_e2e_test.go | sort)"
+      - name: Commit and push Go fixture alignment
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add internal/syncengine/real_refund_e2e_test.go internal/syncengine/real_partial_return_e2e_test.go
+          git commit -m 'Align refund inventory E2E product identities'
+          git push origin HEAD:v1/inventory-central-convergence-e2e
