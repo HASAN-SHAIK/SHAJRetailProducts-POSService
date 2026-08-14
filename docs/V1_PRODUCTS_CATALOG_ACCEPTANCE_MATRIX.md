@@ -24,7 +24,7 @@ Inventory V1 is release-certified and frozen except for real defects. Pricing/pr
 | Barcode fidelity + offline lookup | CERTIFIED | POSService #150/#152 certify initial Central barcode transport; POSService #153 atomically replaces stale primary barcodes and proves Central barcode change -> authenticated feed -> SQLite offline lookup/restart/replay. |
 | Canonical price fact transport | CERTIFIED | POSService #150/#152 prove Central branch-scoped `selling_price` reaches POS SQLite as the effective INR price for the synchronized store. Detailed pricing/tax/promotion semantics remain Pricing V1. |
 | Branch/store applicability | CERTIFIED | Backend #37 + POSService #157 bind the feed to an active Central device registration and isolate branch-A devices from branch-B name/barcode/category/price facts. Backend #38 + POSService #159 add an ID/version-only removal tombstone so a product reassigned away from the trusted branch is deactivated and its stale barcode/price lookup facts are removed; returning it to the branch reactivates the canonical projection. |
-| Change-feed cursor ordering / replay | PARTIAL | Persisted-cursor restart/replay is certified by POSService #150/#152/#153/#156/#157/#159. Catalog-specific multi-page ordering acceptance remains open. |
+| Change-feed cursor ordering / replay | CERTIFIED | POSService #150/#152/#153/#156/#157/#159 certify persisted restart/replay; Backend #39 certifies deterministic mixed product/customer multi-page ordering, exact cursor-boundary continuation, and final replay without duplicate entities. |
 | POS restart persistence | CERTIFIED | POSService #150/#152/#153/#156/#157/#159 restart the same SQLite database and verify synchronized catalog state remains authoritative offline. |
 | Offline name lookup | CERTIFIED | POSService #150/#152/#156/#157/#159 verify synchronized active Central products are searchable offline and deactivated/reassigned/foreign-branch products are not. |
 | SKU lookup | N/A | Current Central V1 product authority has no canonical SKU field. Do not invent a POS-only SKU authority in this domain. |
@@ -36,16 +36,14 @@ Inventory V1 is release-certified and frozen except for real defects. Pricing/pr
 | Product import -> canonical catalog | PARTIAL | Central `imports.service` inserts/updates the canonical `products` table and the current Frontend uses the Central import API. Needs executable import -> Central change feed -> POS SQLite convergence acceptance. |
 | Transactional POS inbox application | CERTIFIED | Existing POS inbox applies supported Central catalog messages in one SQLite transaction and records applied/failed state with duplicate-message idempotency. |
 | Version monotonicity | CERTIFIED | POS product/category/price upserts and branch-removal tombstones reject older versions; category snapshots also preserve newer category facts. |
-| Tenant isolation | PARTIAL | Change feed runs on the resolved tenant DB and requires a registered branch device. Products V1 still needs explicit cross-tenant token/database acceptance before release certification. |
+| Tenant isolation | CERTIFIED | POSService #161 runs the production authenticated Central route against two independent tenant PostgreSQL databases and registered devices: tenant A sees only tenant-A catalog facts, tenant B sees only tenant-B facts, and a tenant-A token is rejected when presented for tenant B. |
 | Operator/support sync diagnostics | PARTIAL | Generic POS sync diagnostics exist; catalog-specific stale/failed change visibility is accepted only after catalog E2E failure/recovery evidence. |
 
 ## Ordered closure work
 
-1. Add explicit cross-tenant catalog token/database isolation acceptance.
-2. Add catalog-specific multi-page cursor ordering/replay acceptance.
-3. Certify Frontend/Backend product import -> canonical Central product -> POS convergence without introducing client catalog authority.
-4. Resolve authoritative UOM/weight semantics only if required for V1 cashier correctness; otherwise move the exact tax/UOM transport boundary into Pricing/Tax V1 with executable boundary acceptance.
-5. Certify catalog-specific failure/diagnostic visibility and run final Products/Catalog release acceptance.
+1. Certify Frontend/Backend product import -> canonical Central product -> POS convergence without introducing client catalog authority.
+2. Resolve authoritative UOM/weight semantics only if required for V1 cashier correctness; otherwise move the exact tax/UOM transport boundary into Pricing/Tax V1 with executable boundary acceptance.
+3. Certify catalog-specific failure/diagnostic visibility and run final Products/Catalog release acceptance.
 
 ## Release rule
 
