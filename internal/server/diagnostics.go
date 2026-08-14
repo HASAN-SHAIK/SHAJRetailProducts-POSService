@@ -4,16 +4,25 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 )
 
 type syncEventDiagnostics struct {
-	CollectedAt time.Time            `json:"collected_at"`
-	Limit       int                  `json:"limit"`
-	Outbox      []outboxEventDetails `json:"outbox"`
-	Inbox       []inboxEventDetails  `json:"inbox"`
+	CollectedAt     time.Time                      `json:"collected_at"`
+	Limit           int                            `json:"limit"`
+	Outbox          []outboxEventDetails           `json:"outbox"`
+	Inbox           []inboxEventDetails            `json:"inbox"`
+	EffectiveConfig effectiveConfigSyncDiagnostics `json:"effective_config"`
+}
+
+type effectiveConfigSyncDiagnostics struct {
+	LastAttemptAt string `json:"last_attempt_at,omitempty"`
+	LastSuccessAt string `json:"last_success_at,omitempty"`
+	LastError     string `json:"last_error,omitempty"`
+	LastETag      string `json:"last_etag,omitempty"`
 }
 
 type outboxEventDetails struct {
@@ -71,13 +80,39 @@ func (s *Server) handleSyncEventDiagnostics(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "inbox_diagnostics_unavailable")
 		return
 	}
+	effectiveConfig, err := s.loadEffectiveConfigDiagnostics(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "effective_config_diagnostics_unavailable")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, syncEventDiagnostics{
-		CollectedAt: time.Now().UTC(),
-		Limit:       limit,
-		Outbox:      outboxItems,
-		Inbox:       inboxItems,
+		CollectedAt:     time.Now().UTC(),
+		Limit:           limit,
+		Outbox:          outboxItems,
+		Inbox:           inboxItems,
+		EffectiveConfig: effectiveConfig,
 	})
+}
+
+func (s *Server) loadEffectiveConfigDiagnostics(ctx context.Context) (effectiveConfigSyncDiagnostics, error) {
+	var attempt, success, lastError, etag sql.NullString
+	err := s.db.SQL().QueryRowContext(ctx, `
+		SELECT last_attempt_at,last_success_at,last_error,last_etag
+		FROM effective_config_sync_state
+		WHERE singleton_id=1`).Scan(&attempt, &success, &lastError, &etag)
+	if errors.Is(err, sql.ErrNoRows) {
+		return effectiveConfigSyncDiagnostics{}, nil
+	}
+	if err != nil {
+		return effectiveConfigSyncDiagnostics{}, err
+	}
+	return effectiveConfigSyncDiagnostics{
+		LastAttemptAt: nullableString(attempt),
+		LastSuccessAt: nullableString(success),
+		LastError:     nullableString(lastError),
+		LastETag:      nullableString(etag),
+	}, nil
 }
 
 func (s *Server) loadOutboxDiagnostics(ctx context.Context, limit int) ([]outboxEventDetails, error) {
