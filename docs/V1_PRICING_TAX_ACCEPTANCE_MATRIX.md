@@ -18,11 +18,11 @@ Transaction Core, Inventory, and Products/Catalog V1 are release-certified and f
 | Capability | Status | Current evidence / required acceptance |
 | --- | --- | --- |
 | Central canonical base-price authority | CERTIFIED | Products/Catalog V1 certifies branch-scoped Central `selling_price` transport into the POS catalog projection. |
-| POS effective price precedence | PARTIAL | POS already resolves store-specific over global price, validity windows, priority and update order; focused V1 acceptance is still required. |
+| POS effective price precedence | CERTIFIED | POSService #170 proves store-specific price beats global, expired/future prices are excluded, priority orders valid prices, and update time is the stable tie-breaker. |
 | Effective price restart/replay | CERTIFIED | Products/Catalog V1 proves synchronized price facts survive SQLite restart and replay idempotently. |
 | Fractional/weighted quantity price math | CERTIFIED | POSService #165 proves `QuantityMilli` drives fractional price calculation without inferring physical UOM semantics. |
 | Canonical UOM/weight interpretation | PARTIAL | Central owns `is_weight_based`; the catalog feed still emits placeholder `unit`. Pricing V1 must define the minimum authoritative weight/UOM rule needed for cashier validation without inventing POS-only semantics. |
-| Manual-price permission | GAP | Central change feed currently hardcodes `allow_manual_price=true`; no audited Central V1 pricing permission has yet been bound to POS execution. |
+| Manual-price permission | CERTIFIED | POSService #169 binds actual POS order execution to cached Central `billing.allow_price_override`, defaults closed without a snapshot, and requires both product capability and Central policy for a true override. |
 | Line discount policy | PARTIAL | POS persists non-negative caller-supplied line discount snapshots and Central accepts discount amounts; authorization/limits and deterministic reconciliation are not yet certified. |
 | Order discount policy | PARTIAL | Central legacy sale path supports an order-level discount; POS/Central ownership and offline policy are not yet certified. |
 | Promotions/campaigns | GAP | No canonical V1 promotion engine has yet been established. Inspect existing capabilities before deciding the minimum V1 promotion scope. |
@@ -36,17 +36,17 @@ Transaction Core, Inventory, and Products/Catalog V1 are release-certified and f
 | Partial-return tax/discount reversal | PARTIAL | Partial-return mechanics are certified, but proportional tax/discount rounding and snapshot parity are not yet certified. |
 | Branch/store price isolation | CERTIFIED | Products/Catalog V1 certifies active-device branch isolation for synchronized price facts. |
 | Tenant price/tax isolation | PARTIAL | Catalog tenant isolation is certified; tenant tax settings and pricing-policy isolation need Pricing V1 acceptance. |
-| Offline pricing availability | PARTIAL | POS has local price facts and offline order calculation, but tax/promotion/manual-price policy is not yet fully synchronized. |
+| Offline pricing availability | PARTIAL | POS has local price facts and cached manual-price policy; tax/promotion/discount policy is not yet fully synchronized into deterministic execution. |
 | Pricing/tax diagnostics | GAP | Operator/support evidence for stale/failed pricing-policy or tax configuration has not yet been certified. |
 
 ## Ordered closure work
 
-1. Reuse Central application/effective configuration and establish the authoritative manual-price, GST-enabled, GST-mode, and rounding policy before changing POS calculation.
-2. Transport the minimum authoritative pricing/tax facts Central -> POS with versioned/replay-safe acceptance.
-3. Make POS calculate and persist deterministic price/discount/tax snapshots offline from those facts; do not delegate authority to Frontend.
+1. Bind Central `billing.allow_discount` / `billing.max_discount_percent` to offline POS execution and establish the order-level discount boundary.
+2. Establish explicit GST-enabled, GST-mode, product-rate/HSN, and rounding authorities in Central and transport the minimum versioned facts Central -> POS.
+3. Make POS calculate and persist deterministic discount/tax snapshots offline from those facts; do not delegate authority to Frontend.
 4. Preserve/reconcile those immutable snapshots through Central ingestion, refunds and partial returns.
 5. Establish the minimum V1 promotion scope only after auditing existing implementation; do not invent a separate campaign subsystem if none is required for V1.
-6. Add branch/tenant isolation, failure diagnostics, and final cross-repository Pricing V1 release acceptance.
+6. Add tenant isolation, failure diagnostics, and final cross-repository Pricing V1 release acceptance.
 
 ## Release rule
 
