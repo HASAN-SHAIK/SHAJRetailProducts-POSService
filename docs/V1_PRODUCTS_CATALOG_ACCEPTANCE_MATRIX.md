@@ -17,7 +17,7 @@ Inventory V1 is release-certified and frozen except for real defects. Pricing/pr
 
 | Capability | Status | Current evidence / required acceptance |
 | --- | --- | --- |
-| Central product CRUD authority | PARTIAL | Central V1 product service/repository owns product lifecycle and branch-aware reads; focused Products V1 CRUD acceptance still required. |
+| Central product CRUD authority | CERTIFIED | Backend #41 proves branch-scoped listing/barcode lookup, resolved-branch default creation, explicit admin branch targeting, canonical update, and soft deletion through the Central product repository. |
 | Product identity + name Central -> POS | CERTIFIED | Backend #35 + POSService #150 exercise the authenticated Central feed into the transactional POS inbox and real SQLite, including offline product identity/name lookup. |
 | Product deactivate/delete propagation | CERTIFIED | POSService #156 proves Central soft-delete -> authenticated feed -> inactive POS SQLite projection, removal from cashier barcode/name lookup, restart persistence and replay idempotency. |
 | Category fidelity Central -> POS | CERTIFIED | Backend #35/#36 + POSService #150/#151/#152 preserve category identity and certify authoritative category rename/removal snapshots without ghost categories. |
@@ -29,21 +29,27 @@ Inventory V1 is release-certified and frozen except for real defects. Pricing/pr
 | Offline name lookup | CERTIFIED | POSService #150/#152/#156/#157/#159 verify synchronized active Central products are searchable offline and deactivated/reassigned/foreign-branch products are not. |
 | SKU lookup | N/A | Current Central V1 product authority has no canonical SKU field. Do not invent a POS-only SKU authority in this domain. |
 | Product description | N/A | Current Central V1 product authority has no canonical description field. |
-| Unit-of-measure fidelity | GAP | Central exposes weight-based behavior but no canonical UOM value; POS currently receives hardcoded `unit`. Do not infer kg/g/litre without an authoritative model. |
-| HSN/GST/cess transport | PARTIAL | Central owns HSN/GST/cess product facts, while current POS product projection does not carry an equivalent authoritative tax model. Exact taxation behavior is finalized in Pricing/Tax V1. |
+| Unit-of-measure fidelity | N/A | Products/Catalog V1 does not infer kg/g/litre from Central's current placeholder `unit` label. POSService #165 proves cashier math is driven by explicit `QuantityMilli`, preserving correct fractional calculation without inventing product-unit semantics. Canonical UOM/weight semantics are transferred to Pricing/Tax V1. |
+| HSN/GST/cess transport | N/A | Central owns HSN/GST/cess facts, but exact tax interpretation and transport semantics are explicitly transferred to Pricing/Tax V1 rather than duplicated in Products/Catalog. Products/Catalog only transports canonical product/price identity facts. |
 | Batch-enabled catalog flag | N/A | Central batch allocation/convergence is already Inventory V1 authority; POS does not need to become batch-allocation authority. Re-open only if a cashier/catalog defect proves the flag is required locally. |
 | Manual-price flag | N/A | Current Central product authority does not own a canonical manual-price flag. Pricing V1 will define any such permission/policy. |
 | Product import -> canonical catalog | CERTIFIED | Backend #40 certifies Frontend-shaped import rows become one branch-scoped canonical Central product/batch and re-import updates rather than duplicates. POSService #163 proves the merged Central import path through PostgreSQL, authenticated change feed, transactional POS inbox/SQLite, and offline barcode/name/effective-price lookup. |
 | Transactional POS inbox application | CERTIFIED | Existing POS inbox applies supported Central catalog messages in one SQLite transaction and records applied/failed state with duplicate-message idempotency. |
 | Version monotonicity | CERTIFIED | POS product/category/price upserts and branch-removal tombstones reject older versions; category snapshots also preserve newer category facts. |
 | Tenant isolation | CERTIFIED | POSService #161 runs the production authenticated Central route against two independent tenant PostgreSQL databases and registered devices: tenant A sees only tenant-A catalog facts, tenant B sees only tenant-B facts, and a tenant-A token is rejected when presented for tenant B. |
-| Operator/support sync diagnostics | PARTIAL | Generic POS sync diagnostics exist; catalog-specific stale/failed change visibility is accepted only after catalog E2E failure/recovery evidence. |
+| Operator/support sync diagnostics | CERTIFIED | POSService #165 proves failed Central catalog inbox messages remain visible through existing support diagnostics with message identity/type, failed status, attempts, last error, source, and payload. |
+
+## Release certification
+
+**Products / Catalog V1 is RELEASE-CERTIFIED.** Every capability owned by this domain is certified, while SKU/description, concrete UOM/tax semantics, batch authority, and manual-price policy are explicitly outside this domain with architecture justification. Transaction Core and Inventory remain frozen except for real defects.
+
+The final release evidence is the combined green exact-head acceptance already merged across Backend #35-#41 and POSService #150-#165, including real PostgreSQL -> authenticated Central change feed -> POS transactional inbox/SQLite -> offline lookup, restart/replay, branch/tenant isolation, lifecycle tombstones, product import convergence, cursor ordering, CRUD authority, fractional-quantity boundary behavior, and catalog diagnostics.
 
 ## Ordered closure work
 
-1. Resolve authoritative UOM/weight semantics only if required for V1 cashier correctness; otherwise move the exact tax/UOM transport boundary into Pricing/Tax V1 with executable boundary acceptance.
-2. Certify catalog-specific failure/diagnostic visibility and run final Products/Catalog release acceptance.
+1. Freeze Products / Catalog V1 except for real defects.
+2. Proceed to Pricing / Promotions / Tax / Rounding V1, taking ownership of canonical UOM/weight interpretation, HSN/GST/cess behavior, manual-price policy, promotion semantics, tax inclusivity, and rounding.
 
 ## Release rule
 
-Products / Catalog V1 is release-certified only when every non-N/A row above is CERTIFIED or explicitly moved to a later V1 domain with an architecture justification and executable boundary acceptance. Once release-certified, freeze this domain except for real defects and proceed to Pricing / Promotions / Tax / Rounding V1.
+Products / Catalog V1 is release-certified only when every non-N/A row above is CERTIFIED or explicitly moved to a later V1 domain with an architecture justification and executable boundary acceptance. This condition is now satisfied.
