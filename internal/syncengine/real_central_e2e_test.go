@@ -36,6 +36,10 @@ func TestRealCentralOrderE2E(t *testing.T) {
 	eventID := "evt-cross-repo-order-e2e"
 	orderID := "ord-cross-repo-e2e"
 
+	// This completed-sale snapshot intentionally carries non-zero discount and GST.
+	// The deterministic POS calculator is certified separately; this E2E proves the
+	// resulting immutable facts survive SQLite outbox delivery and Central projection
+	// without being silently recalculated or rewritten.
 	payload := map[string]any{
 		"order": map[string]any{
 			"id": orderID,
@@ -45,9 +49,9 @@ func TestRealCentralOrderE2E(t *testing.T) {
 			"status": "confirmed",
 			"currency": "INR",
 			"subtotal_minor": 12500,
-			"discount_minor": 0,
-			"tax_minor": 0,
-			"total_minor": 12500,
+			"discount_minor": 500,
+			"tax_minor": 2160,
+			"total_minor": 14160,
 			"version": 2,
 			"completed_at": now,
 			"created_at": now,
@@ -59,9 +63,10 @@ func TestRealCentralOrderE2E(t *testing.T) {
 				"product_name": "Milk",
 				"quantity_milli": 1000,
 				"unit_price_minor": 12500,
-				"discount_minor": 0,
-				"tax_minor": 0,
-				"line_total_minor": 12500,
+				"discount_minor": 500,
+				"tax_minor": 2160,
+				"line_total_minor": 14160,
+				"tax_code": "HSN0401",
 			}},
 		},
 		"payments": []map[string]any{{
@@ -69,7 +74,7 @@ func TestRealCentralOrderE2E(t *testing.T) {
 			"client_payment_id": "client-pay-cross-repo-e2e",
 			"mode": "cash",
 			"direction": "in",
-			"amount_minor": 12500,
+			"amount_minor": 14160,
 			"currency": "INR",
 			"status": "captured",
 			"created_at": now,
@@ -81,8 +86,8 @@ func TestRealCentralOrderE2E(t *testing.T) {
 			"store_id": "store-e2e",
 			"terminal_id": "terminal-e2e",
 			"currency": "INR",
-			"total_minor": 12500,
-			"paid_minor": 12500,
+			"total_minor": 14160,
+			"paid_minor": 14160,
 			"balance_minor": 0,
 			"snapshot": map[string]any{"order_id": orderID},
 			"snapshot_sha256": "e2e-sha256",
