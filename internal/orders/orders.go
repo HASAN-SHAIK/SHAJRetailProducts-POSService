@@ -19,10 +19,16 @@ var (
 	ErrAlreadyComplete = errors.New("order already completed")
 )
 
+type DiscountPolicy struct {
+	Allowed    bool
+	MaxPercent float64
+}
+
 type Service struct {
 	db                  *database.DB
 	catalog             *catalog.Repository
 	priceOverridePolicy func(context.Context) (bool, error)
+	discountPolicy      func(context.Context) (DiscountPolicy, error)
 }
 
 func New(db *database.DB, catalogRepository *catalog.Repository) *Service {
@@ -31,6 +37,10 @@ func New(db *database.DB, catalogRepository *catalog.Repository) *Service {
 
 func (s *Service) SetPriceOverridePolicy(policy func(context.Context) (bool, error)) {
 	s.priceOverridePolicy = policy
+}
+
+func (s *Service) SetDiscountPolicy(policy func(context.Context) (DiscountPolicy, error)) {
+	s.discountPolicy = policy
 }
 
 type CreateInput struct {
@@ -152,6 +162,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	var built []Item
 	var subtotal, discount, tax, total int64
+	var resolvedDiscountPolicy *DiscountPolicy
 
 	for i, in := range input.Items {
 		productID := in.ProductID.String()
@@ -188,6 +199,25 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 			return Order{}, fmt.Errorf("product %s has no price", in.ProductID)
 		}
 		gross := price * in.QuantityMilli / 1000
+		if in.DiscountMinor > 0 && s.discountPolicy != nil {
+			if resolvedDiscountPolicy == nil {
+				policy, policyErr := s.discountPolicy(ctx)
+				if policyErr != nil {
+					return Order{}, fmt.Errorf("load discount policy: %w", policyErr)
+				}
+				if policy.MaxPercent < 0 || policy.MaxPercent > 100 {
+					return Order{}, fmt.Errorf("invalid discount policy max percent %.4f", policy.MaxPercent)
+				}
+				resolvedDiscountPolicy = &policy
+			}
+			if !resolvedDiscountPolicy.Allowed {
+				return Order{}, ErrInvalidOrder
+			}
+			maxDiscount := int64(float64(gross) * resolvedDiscountPolicy.MaxPercent / 100)
+			if in.DiscountMinor > maxDiscount {
+				return Order{}, ErrInvalidOrder
+			}
+		}
 		lineTotal := gross - in.DiscountMinor + in.TaxMinor
 		if lineTotal < 0 {
 			return Order{}, ErrInvalidOrder
