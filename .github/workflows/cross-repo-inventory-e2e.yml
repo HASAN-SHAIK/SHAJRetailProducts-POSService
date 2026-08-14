@@ -42,11 +42,11 @@ jobs:
       - name: Checkout POS Service
         uses: actions/checkout@v4
 
-      - name: Checkout Backend main
+      - name: Checkout Backend trusted-device branch
         uses: actions/checkout@v4
         with:
           repository: HASAN-SHAIK/SHAJRetailProducts-Backend
-          ref: main
+          ref: v1/inventory-trusted-device-context
           path: backend
 
       - name: Set up Go
@@ -92,6 +92,16 @@ jobs:
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
           );
           INSERT INTO products(id,stock_quantity,is_deleted) VALUES(101,5.000,FALSE);
+
+          CREATE TABLE branch_devices (
+            id UUID PRIMARY KEY,
+            device_id TEXT NOT NULL UNIQUE,
+            branch_id UUID,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          INSERT INTO branch_devices(id,device_id,branch_id,is_active)
+          VALUES('22222222-2222-2222-2222-222222222222','device-e2e','11111111-1111-1111-1111-111111111111',TRUE);
           SQL
 
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-sync-events.sql
