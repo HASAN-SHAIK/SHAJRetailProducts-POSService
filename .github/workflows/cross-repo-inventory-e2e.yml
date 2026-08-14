@@ -175,9 +175,10 @@ jobs:
             echo "canonical stock expected 4.000 after one -1000 milli movement, got $stock"
             exit 1
           fi
-          batch_stock=$(psql -h 127.0.0.1 -U postgres -d tenant_e2e -At -v ON_ERROR_STOP=1 -c "SELECT quantity_remaining FROM batches WHERE id='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'")
-          if [ "$batch_stock" != "4.000" ]; then
-            echo "canonical batch quantity expected 4.000 after one sale issue, got $batch_stock"
+          batch_ok=$(psql -h 127.0.0.1 -U postgres -d tenant_e2e -At -v ON_ERROR_STOP=1 -c "SELECT CASE WHEN quantity_remaining = 4.000 THEN 1 ELSE 0 END FROM batches WHERE id='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'")
+          if [ "$batch_ok" != "1" ]; then
+            batch_stock=$(psql -h 127.0.0.1 -U postgres -d tenant_e2e -At -v ON_ERROR_STOP=1 -c "SELECT quantity_remaining FROM batches WHERE id='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'")
+            echo "canonical batch quantity expected numeric 4.000 after one sale issue, got $batch_stock"
             exit 1
           fi
           allocation_count=$(psql -h 127.0.0.1 -U postgres -d tenant_e2e -At -v ON_ERROR_STOP=1 -c "SELECT COUNT(*) FROM pos_inventory_batch_allocations WHERE movement_id IN (SELECT movement_id FROM pos_inventory_movements WHERE product_id='101') AND allocation_kind='batch' AND quantity_milli=1000")
