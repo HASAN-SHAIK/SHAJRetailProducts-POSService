@@ -162,6 +162,7 @@ jobs:
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-inventory-movement-recorded.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-13-pos-inventory-canonical-application.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-14-pos-inventory-batch-allocations.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-14-pos-inventory-reconciliation-provenance.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 <<'SQL'
           INSERT INTO pos_inventory_batch_allocations(
             movement_id,allocation_seq,order_id,order_item_id,product_id,branch_id,batch_id,
@@ -234,6 +235,7 @@ jobs:
           assert_one "SELECT COUNT(*) FROM pos_sales WHERE order_id='ord-refund-cross-repo-e2e' AND status='returned' AND version=4" "compatibility returned sale"
           assert_one "SELECT COUNT(*) FROM pos_sale_payments WHERE order_id='ord-refund-cross-repo-e2e' AND direction='out' AND status='refunded' AND amount_minor=10000" "central payment reversal"
           assert_one "SELECT COUNT(*) FROM pos_inventory_movements WHERE order_id='ord-refund-cross-repo-e2e' AND movement_type='sale_return' AND quantity_delta_milli=1000" "central inventory restoration"
+          assert_one "SELECT COUNT(*) FROM pos_inventory_movements WHERE order_id='ord-refund-cross-repo-e2e' AND movement_type='sale_return' AND canonical_device_id='device-e2e' AND canonical_branch_id='11111111-1111-1111-1111-111111111111'::uuid" "refund reconciliation provenance"
           assert_one "SELECT COUNT(*) FROM products WHERE id=101 AND stock_quantity=5.000" "canonical product stock restoration"
           assert_one "SELECT COUNT(*) FROM batches WHERE id='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' AND quantity_remaining=5.000" "canonical batch stock restoration"
           assert_one "SELECT COUNT(*) FROM pos_inventory_batch_allocations WHERE order_id='ord-refund-cross-repo-e2e' AND order_item_id='item-refund-cross-repo-e2e' AND source_movement_type='sale_return' AND allocation_kind='batch' AND quantity_milli=1000" "full refund original-batch restoration ledger"
