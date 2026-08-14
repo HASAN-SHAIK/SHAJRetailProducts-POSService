@@ -53,6 +53,17 @@ func (s *Store) Bool(ctx context.Context, key string, defaultValue bool) (bool, 
     return typed, nil
 }
 
+func (s *Store) Float64(ctx context.Context, key string, defaultValue float64) (float64, error) {
+    snapshot, err := s.Get(ctx)
+    if errors.Is(err, sql.ErrNoRows) { return defaultValue, nil }
+    if err != nil { return 0, err }
+    value, ok := snapshot.Values[key]
+    if !ok || value == nil { return defaultValue, nil }
+    typed, ok := value.(float64)
+    if !ok { return 0, fmt.Errorf("effective configuration %s must be numeric", key) }
+    return typed, nil
+}
+
 func (s *Store) Save(ctx context.Context, snapshot Snapshot) error {
     if snapshot.SchemaVersion <= 0 || snapshot.ETag == "" { return errors.New("effective configuration schema_version and etag are required") }
     raw, err := json.Marshal(snapshot)
