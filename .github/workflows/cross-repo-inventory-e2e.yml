@@ -42,11 +42,11 @@ jobs:
       - name: Checkout POS Service
         uses: actions/checkout@v4
 
-      - name: Checkout Backend batch-allocation branch
+      - name: Checkout merged Backend main
         uses: actions/checkout@v4
         with:
           repository: HASAN-SHAIK/SHAJRetailProducts-Backend
-          ref: v1/inventory-batch-allocation-ledger
+          ref: main
           path: backend
 
       - name: Set up Go
