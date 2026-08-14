@@ -2,6 +2,7 @@ package main
 
 import (
     "context"
+    "fmt"
     "log/slog"
     "os"
     "os/signal"
@@ -44,6 +45,14 @@ func main() {
     effectiveConfigStore := effectiveconfig.NewStore(db)
     orderService.SetPriceOverridePolicy(func(ctx context.Context) (bool, error) {
         return effectiveConfigStore.Bool(ctx, "billing.allow_price_override", false)
+    })
+    orderService.SetDiscountPolicy(func(ctx context.Context) (orders.DiscountPolicy, error) {
+        allowed, err := effectiveConfigStore.Bool(ctx, "billing.allow_discount", false)
+        if err != nil { return orders.DiscountPolicy{}, err }
+        maxPercent, err := effectiveConfigStore.Float64(ctx, "billing.max_discount_percent", 20)
+        if err != nil { return orders.DiscountPolicy{}, err }
+        if maxPercent < 0 || maxPercent > 100 { return orders.DiscountPolicy{}, fmt.Errorf("billing.max_discount_percent must be between 0 and 100") }
+        return orders.DiscountPolicy{Allowed: allowed, MaxPercent: maxPercent}, nil
     })
     paymentService := payments.New(db); inventoryService := inventory.New(db); receiptService := receipts.New(db)
     app := server.NewSecure(cfg, db, deviceService, catalogRepository, customerRepository, orderService, paymentService, inventoryService, receiptService, localAuth)
