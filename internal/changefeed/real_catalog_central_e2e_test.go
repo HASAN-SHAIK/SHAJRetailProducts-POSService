@@ -44,14 +44,25 @@ func TestRealCentralCatalogConvergenceE2E(t *testing.T) {
 
 	repo := catalog.NewRepository(db)
 	const storeID = "11111111-1111-1111-1111-111111111111"
+	const oldBarcode = "8901234567890"
+	const newBarcode = "8901234567891"
 	const oldCategoryID = "Fresh%20Produce%20%26%20Dairy"
-	byBarcode, err := repo.GetByBarcode(ctx, "8901234567890", storeID)
+	byBarcode, err := repo.GetByBarcode(ctx, oldBarcode, storeID)
 	if err != nil { _ = db.Close(); t.Fatalf("initial offline barcode lookup: %v", err) }
 	if byBarcode.ID != "101" || byBarcode.Name != "Fresh Milk" || byBarcode.CategoryID == nil || *byBarcode.CategoryID != oldCategoryID { _ = db.Close(); t.Fatalf("unexpected initial product: %#v", byBarcode) }
 	if byBarcode.Price == nil || byBarcode.Price.AmountMinor != 6550 || byBarcode.Price.Currency != "INR" { _ = db.Close(); t.Fatalf("initial effective price mismatch: %#v", byBarcode.Price) }
 	categories, err := repo.ListCategories(ctx)
 	if err != nil { _ = db.Close(); t.Fatal(err) }
 	if len(categories) != 1 || categories[0].ID != oldCategoryID { _ = db.Close(); t.Fatalf("unexpected initial categories: %#v", categories) }
+
+	mutateCatalogState(t, centralURL, "barcode")
+	more, err = puller.pullOnce(ctx)
+	if err != nil { _ = db.Close(); t.Fatalf("pull replaced Central barcode: %v", err) }
+	if more { _ = db.Close(); t.Fatal("unexpected page after barcode replacement") }
+	if _, err = repo.GetByBarcode(ctx, oldBarcode, storeID); err == nil { _ = db.Close(); t.Fatal("stale primary barcode still resolves after Central replacement") }
+	byBarcode, err = repo.GetByBarcode(ctx, newBarcode, storeID)
+	if err != nil { _ = db.Close(); t.Fatalf("replacement offline barcode lookup: %v", err) }
+	if byBarcode.ID != "101" || byBarcode.Name != "Fresh Milk" { _ = db.Close(); t.Fatalf("replacement barcode resolved wrong product: %#v", byBarcode) }
 
 	mutateCatalogState(t, centralURL, "rename")
 	more, err = puller.pullOnce(ctx)
@@ -60,7 +71,7 @@ func TestRealCentralCatalogConvergenceE2E(t *testing.T) {
 	categories, err = repo.ListCategories(ctx)
 	if err != nil { _ = db.Close(); t.Fatal(err) }
 	if len(categories) != 1 || categories[0].ID != "New%20Dairy" || categories[0].Name != "New Dairy" { _ = db.Close(); t.Fatalf("category rename left stale/incorrect categories: %#v", categories) }
-	byBarcode, err = repo.GetByBarcode(ctx, "8901234567890", storeID)
+	byBarcode, err = repo.GetByBarcode(ctx, newBarcode, storeID)
 	if err != nil { _ = db.Close(); t.Fatal(err) }
 	if byBarcode.CategoryID == nil || *byBarcode.CategoryID != "New%20Dairy" { _ = db.Close(); t.Fatalf("product did not converge to renamed category: %#v", byBarcode.CategoryID) }
 
@@ -81,9 +92,10 @@ func TestRealCentralCatalogConvergenceE2E(t *testing.T) {
 	defer db.Close()
 	if err := db.Migrate(ctx); err != nil { t.Fatalf("migrate restarted POS database: %v", err) }
 	repo = catalog.NewRepository(db)
-	byBarcode, err = repo.GetByBarcode(ctx, "8901234567890", storeID)
-	if err != nil { t.Fatalf("offline barcode lookup after restart: %v", err) }
+	byBarcode, err = repo.GetByBarcode(ctx, newBarcode, storeID)
+	if err != nil { t.Fatalf("offline replacement barcode lookup after restart: %v", err) }
 	if byBarcode.CategoryID != nil { t.Fatalf("cleared category did not persist across restart: %#v", byBarcode.CategoryID) }
+	if _, err = repo.GetByBarcode(ctx, oldBarcode, storeID); err == nil { t.Fatal("stale primary barcode returned after SQLite restart") }
 	matches, err := repo.Search(ctx, "fresh milk", storeID, 20)
 	if err != nil || len(matches) != 1 || matches[0].ID != "101" { t.Fatalf("offline name lookup after restart failed: matches=%#v err=%v", matches, err) }
 
