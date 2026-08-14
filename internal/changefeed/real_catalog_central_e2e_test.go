@@ -83,6 +83,18 @@ func TestRealCentralCatalogConvergenceE2E(t *testing.T) {
 	if err != nil { _ = db.Close(); t.Fatal(err) }
 	if len(categories) != 0 { _ = db.Close(); t.Fatalf("removed Central category remained visible in POS: %#v", categories) }
 
+	mutateCatalogState(t, centralURL, "deactivate")
+	more, err = puller.pullOnce(ctx)
+	if err != nil { _ = db.Close(); t.Fatalf("pull deactivated Central product: %v", err) }
+	if more { _ = db.Close(); t.Fatal("unexpected page after product deactivation") }
+	if _, err = repo.GetByBarcode(ctx, newBarcode, storeID); err == nil { _ = db.Close(); t.Fatal("deactivated Central product still resolves by barcode") }
+	matches, err := repo.Search(ctx, "fresh milk", storeID, 20)
+	if err != nil { _ = db.Close(); t.Fatal(err) }
+	if len(matches) != 0 { _ = db.Close(); t.Fatalf("deactivated Central product still appears in offline search: %#v", matches) }
+	deactivated, err := repo.GetProduct(ctx, "101", storeID)
+	if err != nil { _ = db.Close(); t.Fatalf("load deactivated local projection: %v", err) }
+	if deactivated.IsActive { _ = db.Close(); t.Fatalf("Central soft-delete did not persist as inactive POS product: %#v", deactivated) }
+
 	var appliedBeforeRestart int
 	if err := db.SQL().QueryRow(`SELECT COUNT(*) FROM inbox_messages WHERE status='applied'`).Scan(&appliedBeforeRestart); err != nil { _ = db.Close(); t.Fatal(err) }
 	if err := db.Close(); err != nil { t.Fatalf("close POS database before restart: %v", err) }
@@ -92,12 +104,13 @@ func TestRealCentralCatalogConvergenceE2E(t *testing.T) {
 	defer db.Close()
 	if err := db.Migrate(ctx); err != nil { t.Fatalf("migrate restarted POS database: %v", err) }
 	repo = catalog.NewRepository(db)
-	byBarcode, err = repo.GetByBarcode(ctx, newBarcode, storeID)
-	if err != nil { t.Fatalf("offline replacement barcode lookup after restart: %v", err) }
-	if byBarcode.CategoryID != nil { t.Fatalf("cleared category did not persist across restart: %#v", byBarcode.CategoryID) }
+	if _, err = repo.GetByBarcode(ctx, newBarcode, storeID); err == nil { t.Fatal("deactivated product barcode returned after SQLite restart") }
 	if _, err = repo.GetByBarcode(ctx, oldBarcode, storeID); err == nil { t.Fatal("stale primary barcode returned after SQLite restart") }
-	matches, err := repo.Search(ctx, "fresh milk", storeID, 20)
-	if err != nil || len(matches) != 1 || matches[0].ID != "101" { t.Fatalf("offline name lookup after restart failed: matches=%#v err=%v", matches, err) }
+	matches, err = repo.Search(ctx, "fresh milk", storeID, 20)
+	if err != nil || len(matches) != 0 { t.Fatalf("deactivated product returned after restart: matches=%#v err=%v", matches, err) }
+	deactivated, err = repo.GetProduct(ctx, "101", storeID)
+	if err != nil { t.Fatal(err) }
+	if deactivated.IsActive || deactivated.CategoryID != nil { t.Fatalf("inactive/category-cleared state did not persist across restart: %#v", deactivated) }
 
 	restartedPuller := New(db, inbox.New(db), centralURL, tenantID, syncToken, deviceID, 5*time.Second, time.Second)
 	more, err = restartedPuller.pullOnce(ctx)

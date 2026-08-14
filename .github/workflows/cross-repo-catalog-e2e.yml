@@ -148,6 +148,8 @@ jobs:
                 await tenantPool.query(`UPDATE products SET category='New Dairy', updated_at='2026-08-14T06:32:00Z' WHERE id=101`);
               } else if (req.params.state === 'clear') {
                 await tenantPool.query(`UPDATE products SET category=NULL, updated_at='2026-08-14T06:33:00Z' WHERE id=101`);
+              } else if (req.params.state === 'deactivate') {
+                await tenantPool.query(`UPDATE products SET is_deleted=TRUE, updated_at='2026-08-14T06:34:00Z' WHERE id=101`);
               } else {
                 return res.status(400).json({ code: 'UNKNOWN_STATE' });
               }
@@ -175,7 +177,7 @@ jobs:
           cat /tmp/pos-central-catalog-e2e.log
           exit 1
 
-      - name: Pull, replace barcode, rename/remove category, restart and replay catalog
+      - name: Pull, mutate and deactivate Central catalog through SQLite
         run: CGO_ENABLED=1 go test ./internal/changefeed -run '^TestRealCentralCatalogConvergenceE2E$' -count=1 -v
 
       - name: Run focused primary barcode replacement acceptance
