@@ -13,6 +13,13 @@ func TestV1InventoryOperatorVisibilityCombinesLocalTruthAndSyncState(t *testing.
 	ctx := context.Background()
 
 	_, err := db.SQL().ExecContext(ctx, `
+		INSERT INTO catalog_products(id,sku,name,track_inventory,version,updated_at)
+		VALUES('product-101','VIS-101','Visibility Product',1,1,'2026-08-14T03:29:00Z')`)
+	if err != nil {
+		t.Fatalf("insert catalog product: %v", err)
+	}
+
+	_, err = db.SQL().ExecContext(ctx, `
 		INSERT INTO inventory_balances(store_id,product_id,on_hand_milli,reserved_milli,version,updated_at)
 		VALUES('store-1','product-101',3500,500,7,'2026-08-14T03:30:00Z')`)
 	if err != nil {
