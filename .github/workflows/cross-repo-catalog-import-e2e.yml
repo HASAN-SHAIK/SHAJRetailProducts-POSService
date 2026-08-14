@@ -1,0 +1,119 @@
+name: Cross-repo Catalog Import E2E
+
+on:
+  pull_request:
+    paths:
+      - 'internal/changefeed/real_catalog_import_e2e_test.go'
+      - '.github/workflows/cross-repo-catalog-import-e2e.yml'
+
+jobs:
+  catalog-import-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: postgres
+      MASTER_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/masterdb
+      TENANT_DATABASE_URL_TEMPLATE: postgres://postgres:postgres@127.0.0.1:5432/{db}
+      DB_SSL: 'false'
+      POS_SYNC_TOKENS_JSON: '{"tenant-e2e":"sync-secret"}'
+      POS_E2E_CENTRAL_URL: http://127.0.0.1:5001
+      POS_E2E_TENANT_ID: tenant-e2e
+      POS_E2E_SYNC_TOKEN: sync-secret
+      POS_E2E_DEVICE_ID: device-e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Backend
+          ref: main
+          path: backend
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Create Central catalog databases
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE DATABASE masterdb;
+          CREATE DATABASE tenant_e2e;
+          SQL
+          psql -h 127.0.0.1 -U postgres -d masterdb -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE tenants (id TEXT PRIMARY KEY, shop_name TEXT, owner_name TEXT, email TEXT, mobile TEXT, plan_type TEXT, is_active BOOLEAN NOT NULL DEFAULT TRUE, addons JSONB NOT NULL DEFAULT '{}'::jsonb, gst_mode TEXT, database_name TEXT NOT NULL);
+          INSERT INTO tenants VALUES ('tenant-e2e','Catalog Import Shop','Owner','e2e@example.test','0000000000','pro',TRUE,'{}','INCLUSIVE','tenant_e2e');
+          SQL
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE settings (id BIGSERIAL PRIMARY KEY, is_opening_completed BOOLEAN NOT NULL DEFAULT FALSE);
+          INSERT INTO settings(is_opening_completed) VALUES(FALSE);
+          CREATE TABLE products (
+            id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL, company TEXT, category TEXT, selling_price NUMERIC(14,2), purchase_price NUMERIC(14,2), mrp NUMERIC(14,2), hsn_code TEXT, gst_percentage NUMERIC(8,2), barcode TEXT, stock_quantity NUMERIC(14,3) NOT NULL DEFAULT 0, expiry_date DATE, is_batch_enabled BOOLEAN NOT NULL DEFAULT FALSE, branch_id UUID, is_weight_based BOOLEAN NOT NULL DEFAULT FALSE, time_for_delivery INTEGER NOT NULL DEFAULT 0, is_deleted BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          CREATE TABLE batches (
+            id BIGSERIAL PRIMARY KEY, product_id BIGINT NOT NULL REFERENCES products(id), branch_id UUID, batch_number TEXT, expiry_date DATE, purchase_price NUMERIC(14,2), selling_price NUMERIC(14,2), quantity NUMERIC(14,3), quantity_remaining NUMERIC(14,3)
+          );
+          CREATE TABLE customers (id BIGINT PRIMARY KEY, name TEXT NOT NULL, phone TEXT, mobile TEXT, credit_limit NUMERIC(14,2) NOT NULL DEFAULT 0, current_balance NUMERIC(14,2) NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+          CREATE TABLE branch_devices (id UUID PRIMARY KEY, device_id TEXT NOT NULL, branch_id UUID NOT NULL, is_active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+          INSERT INTO branch_devices VALUES('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','device-e2e','11111111-1111-1111-1111-111111111111',TRUE,NOW());
+          SQL
+      - name: Install Backend dependencies
+        working-directory: backend
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Start Central import and production change-feed routes
+        run: |
+          cat > backend/e2e-pos-catalog-import-server.js <<'NODE'
+          const express = require('express');
+          const { Pool } = require('pg');
+          const syncRouter = require('./src/api/v1/modules/sync/posSync.routes');
+          const { importProductsFromRows } = require('./src/services/productImport.service');
+          const app = express();
+          const tenantPool = new Pool({ connectionString: 'postgres://postgres:postgres@127.0.0.1:5432/tenant_e2e' });
+          app.use(express.json());
+          app.post('/e2e/import', async (req, res, next) => {
+            try {
+              const summary = await importProductsFromRows({ tenantPool, headers: { 'x-branch-id': '11111111-1111-1111-1111-111111111111' }, user: { role: 'admin', all_branch_access: true } }, [{
+                name: 'Imported Catalog Milk', company: 'Dairy Co', category: 'Imported Dairy', barcode: '8901234567404', stock_quantity: 12, purchase_price: 45, mrp: 60, gst_percentage: 5, batch_number: 'IMP-E2E-001', expiry_date: '2026-09-30', is_weight_based: 0, selling_price: 55.5
+              }]);
+              if (summary.inserted !== 1 || summary.errors.length) return res.status(500).json(summary);
+              res.status(201).json(summary);
+            } catch (error) { next(error); }
+          });
+          app.use('/api/v1/sync', syncRouter);
+          app.use((error, req, res, next) => { console.error(error); res.status(500).json({ code: error.code || 'E2E_SERVER_ERROR', message: error.message }); });
+          const server = app.listen(5001, '127.0.0.1');
+          const shutdown = () => server.close(async () => { await tenantPool.end(); process.exit(0); });
+          process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
+          NODE
+          node backend/e2e-pos-catalog-import-server.js >/tmp/catalog-import.log 2>&1 &
+          echo $! >/tmp/catalog-import.pid
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:5001/api/v1/sync/changes' || true)
+            if [ "$code" = "401" ]; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/catalog-import.log
+          exit 1
+      - name: Prove import to POS SQLite offline convergence
+        run: CGO_ENABLED=1 go test ./internal/changefeed -run '^TestRealCentralImportedProductConvergenceE2E$' -count=1 -v
+      - name: Show backend log on failure
+        if: failure()
+        run: cat /tmp/catalog-import.log || true
+      - name: Stop E2E backend
+        if: always()
+        run: |
+          if [ -f /tmp/catalog-import.pid ]; then kill "$(cat /tmp/catalog-import.pid)" || true; fi
