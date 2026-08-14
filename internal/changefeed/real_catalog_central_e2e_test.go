@@ -88,12 +88,32 @@ func TestRealCentralCatalogConvergenceE2E(t *testing.T) {
 	if err != nil { _ = db.Close(); t.Fatal(err) }
 	if len(categories) != 0 { _ = db.Close(); t.Fatalf("removed Central category remained visible in POS: %#v", categories) }
 
+	mutateCatalogState(t, centralURL, "reassign")
+	more, err = puller.pullOnce(ctx)
+	if err != nil { _ = db.Close(); t.Fatalf("pull product branch reassignment cleanup: %v", err) }
+	if more { _ = db.Close(); t.Fatal("unexpected page after branch reassignment") }
+	if _, err = repo.GetByBarcode(ctx, newBarcode, storeID); err == nil { _ = db.Close(); t.Fatal("product reassigned away from device branch still resolves by barcode") }
+	matches, err := repo.Search(ctx, "fresh milk", storeID, 20)
+	if err != nil { _ = db.Close(); t.Fatal(err) }
+	if len(matches) != 0 { _ = db.Close(); t.Fatalf("product reassigned away from device branch still appears in search: %#v", matches) }
+	removed, err := repo.GetProduct(ctx, "101", storeID)
+	if err != nil { _ = db.Close(); t.Fatalf("load reassigned local projection: %v", err) }
+	if removed.IsActive || len(removed.Barcodes) != 0 || removed.Price != nil { _ = db.Close(); t.Fatalf("branch reassignment did not clean the old POS projection: %#v", removed) }
+
+	mutateCatalogState(t, centralURL, "return")
+	more, err = puller.pullOnce(ctx)
+	if err != nil { _ = db.Close(); t.Fatalf("pull product return to trusted branch: %v", err) }
+	if more { _ = db.Close(); t.Fatal("unexpected page after product return to branch") }
+	byBarcode, err = repo.GetByBarcode(ctx, newBarcode, storeID)
+	if err != nil { _ = db.Close(); t.Fatalf("returned product did not reactivate in trusted branch: %v", err) }
+	if !byBarcode.IsActive || byBarcode.ID != "101" { _ = db.Close(); t.Fatalf("returned product did not restore correctly: %#v", byBarcode) }
+
 	mutateCatalogState(t, centralURL, "deactivate")
 	more, err = puller.pullOnce(ctx)
 	if err != nil { _ = db.Close(); t.Fatalf("pull deactivated Central product: %v", err) }
 	if more { _ = db.Close(); t.Fatal("unexpected page after product deactivation") }
 	if _, err = repo.GetByBarcode(ctx, newBarcode, storeID); err == nil { _ = db.Close(); t.Fatal("deactivated Central product still resolves by barcode") }
-	matches, err := repo.Search(ctx, "fresh milk", storeID, 20)
+	matches, err = repo.Search(ctx, "fresh milk", storeID, 20)
 	if err != nil { _ = db.Close(); t.Fatal(err) }
 	if len(matches) != 0 { _ = db.Close(); t.Fatalf("deactivated Central product still appears in offline search: %#v", matches) }
 	deactivated, err := repo.GetProduct(ctx, "101", storeID)
