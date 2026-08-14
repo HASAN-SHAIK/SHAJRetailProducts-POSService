@@ -2,6 +2,7 @@ package effectiveconfig
 
 import (
     "context"
+    "database/sql"
     "encoding/json"
     "errors"
     "fmt"
@@ -39,6 +40,17 @@ func (s *Store) Get(ctx context.Context) (Snapshot, error) {
     if err := json.Unmarshal([]byte(payload), &out); err != nil { return Snapshot{}, fmt.Errorf("decode effective config snapshot: %w", err) }
     out.FetchedAt = fetchedAt
     return out, nil
+}
+
+func (s *Store) Bool(ctx context.Context, key string, defaultValue bool) (bool, error) {
+    snapshot, err := s.Get(ctx)
+    if errors.Is(err, sql.ErrNoRows) { return defaultValue, nil }
+    if err != nil { return false, err }
+    value, ok := snapshot.Values[key]
+    if !ok || value == nil { return defaultValue, nil }
+    typed, ok := value.(bool)
+    if !ok { return false, fmt.Errorf("effective configuration %s must be boolean", key) }
+    return typed, nil
 }
 
 func (s *Store) Save(ctx context.Context, snapshot Snapshot) error {

@@ -1,0 +1,32 @@
+name: V1 pricing tax acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cmd/posservice/main.go'
+      - 'internal/orders/orders.go'
+      - 'internal/orders/manual_price_policy_v1_test.go'
+      - 'internal/effectiveconfig/store.go'
+      - 'internal/effectiveconfig/pricing_policy_v1_test.go'
+      - 'docs/V1_PRICING_TAX_ACCEPTANCE_MATRIX.md'
+      - '.github/workflows/v1-pricing-tax.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pricing-policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+      - name: Run V1 pricing policy acceptance
+        run: go test ./internal/orders ./internal/effectiveconfig
+      - name: Build packaged POS runtime
+        run: go build ./cmd/posservice
