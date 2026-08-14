@@ -6,6 +6,7 @@ import (
     "encoding/json"
     "errors"
     "fmt"
+    "math"
     "time"
 
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
@@ -74,8 +75,19 @@ func applyCategorySnapshot(ctx context.Context, tx *sql.Tx, raw []byte) error {
     return nil
 }
 
-type productPayload struct { ID string `json:"id"`; CategoryID *string `json:"category_id"`; SKU *string `json:"sku"`; Name string `json:"name"`; Description *string `json:"description"`; UnitOfMeasure *string `json:"unit_of_measure"`; TaxCode *string `json:"tax_code"`; IsActive bool `json:"is_active"`; AllowManualPrice bool `json:"allow_manual_price"`; TrackInventory bool `json:"track_inventory"`; Version int `json:"version"`; SourceUpdatedAt *string `json:"source_updated_at"` }
-func upsertProduct(ctx context.Context,tx *sql.Tx,raw []byte) error { var p productPayload; if json.Unmarshal(raw,&p)!=nil || p.ID=="" || p.Name=="" { return errors.New("invalid_product_payload") }; now:=time.Now().UTC().Format(time.RFC3339Nano); _,err:=tx.ExecContext(ctx,`INSERT INTO catalog_products(id,category_id,sku,name,description,unit_of_measure,tax_code,is_active,allow_manual_price,track_inventory,version,source_updated_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET category_id=excluded.category_id,sku=excluded.sku,name=excluded.name,description=excluded.description,unit_of_measure=excluded.unit_of_measure,tax_code=excluded.tax_code,is_active=excluded.is_active,allow_manual_price=excluded.allow_manual_price,track_inventory=excluded.track_inventory,version=excluded.version,source_updated_at=excluded.source_updated_at,updated_at=excluded.updated_at WHERE excluded.version>=catalog_products.version`,p.ID,p.CategoryID,p.SKU,p.Name,p.Description,p.UnitOfMeasure,p.TaxCode,boolInt(p.IsActive),boolInt(p.AllowManualPrice),boolInt(p.TrackInventory),p.Version,p.SourceUpdatedAt,now); return err }
+type productPayload struct { ID string `json:"id"`; CategoryID *string `json:"category_id"`; SKU *string `json:"sku"`; Name string `json:"name"`; Description *string `json:"description"`; UnitOfMeasure *string `json:"unit_of_measure"`; TaxCode *string `json:"tax_code"`; GSTRatePercent *float64 `json:"gst_rate_percent"`; IsActive bool `json:"is_active"`; AllowManualPrice bool `json:"allow_manual_price"`; TrackInventory bool `json:"track_inventory"`; Version int `json:"version"`; SourceUpdatedAt *string `json:"source_updated_at"` }
+func upsertProduct(ctx context.Context,tx *sql.Tx,raw []byte) error {
+    var p productPayload
+    if json.Unmarshal(raw,&p)!=nil || p.ID=="" || p.Name=="" { return errors.New("invalid_product_payload") }
+    var gstRateBps any
+    if p.GSTRatePercent != nil {
+        if *p.GSTRatePercent < 0 || *p.GSTRatePercent > 100 { return errors.New("invalid_product_gst_rate") }
+        gstRateBps = int64(math.Round(*p.GSTRatePercent * 100))
+    }
+    now:=time.Now().UTC().Format(time.RFC3339Nano)
+    _,err:=tx.ExecContext(ctx,`INSERT INTO catalog_products(id,category_id,sku,name,description,unit_of_measure,tax_code,gst_rate_bps,is_active,allow_manual_price,track_inventory,version,source_updated_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET category_id=excluded.category_id,sku=excluded.sku,name=excluded.name,description=excluded.description,unit_of_measure=excluded.unit_of_measure,tax_code=excluded.tax_code,gst_rate_bps=excluded.gst_rate_bps,is_active=excluded.is_active,allow_manual_price=excluded.allow_manual_price,track_inventory=excluded.track_inventory,version=excluded.version,source_updated_at=excluded.source_updated_at,updated_at=excluded.updated_at WHERE excluded.version>=catalog_products.version`,p.ID,p.CategoryID,p.SKU,p.Name,p.Description,p.UnitOfMeasure,p.TaxCode,gstRateBps,boolInt(p.IsActive),boolInt(p.AllowManualPrice),boolInt(p.TrackInventory),p.Version,p.SourceUpdatedAt,now)
+    return err
+}
 
 type productRemovePayload struct { ID string `json:"id"`; Version int `json:"version"`; SourceUpdatedAt *string `json:"source_updated_at"` }
 func removeProduct(ctx context.Context, tx *sql.Tx, raw []byte) error {
