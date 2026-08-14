@@ -96,6 +96,11 @@ jobs:
           SQL
 
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE branches (
+            id UUID PRIMARY KEY,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          INSERT INTO branches(id) VALUES('11111111-1111-1111-1111-111111111111');
           CREATE TABLE orders (
             id BIGSERIAL PRIMARY KEY,
             client_order_id TEXT,
@@ -121,11 +126,25 @@ jobs:
           CREATE TABLE products (
             id BIGINT PRIMARY KEY,
             stock_quantity NUMERIC(14,3) NOT NULL DEFAULT 0,
+            is_batch_enabled BOOLEAN NOT NULL DEFAULT FALSE,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             is_deleted BOOLEAN NOT NULL DEFAULT FALSE
           );
-          INSERT INTO products(id, stock_quantity, updated_at, is_deleted)
-          VALUES(102, 4.000, NOW(), FALSE);
+          INSERT INTO products(id, stock_quantity, is_batch_enabled, updated_at, is_deleted)
+          VALUES(102, 4.000, TRUE, NOW(), FALSE);
+          CREATE TABLE batches (
+            id UUID PRIMARY KEY,
+            product_id BIGINT NOT NULL REFERENCES products(id),
+            branch_id UUID REFERENCES branches(id),
+            quantity NUMERIC NOT NULL DEFAULT 0,
+            quantity_remaining NUMERIC,
+            expiry_date DATE,
+            is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          INSERT INTO batches(id,product_id,branch_id,quantity,quantity_remaining,expiry_date,is_deleted)
+          VALUES('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',102,'11111111-1111-1111-1111-111111111111',5.000,4.000,CURRENT_DATE + 30,FALSE);
           CREATE TABLE branch_devices (
             id UUID PRIMARY KEY,
             device_id TEXT NOT NULL UNIQUE,
@@ -142,6 +161,16 @@ jobs:
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-payment-recorded.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-inventory-movement-recorded.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-13-pos-inventory-canonical-application.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-14-pos-inventory-batch-allocations.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO pos_inventory_batch_allocations(
+            movement_id,allocation_seq,order_id,order_item_id,product_id,branch_id,batch_id,
+            quantity_milli,allocation_kind,source_movement_type
+          ) VALUES(
+            'issue-partial-return-cross-repo-e2e',1,'ord-partial-return-cross-repo-e2e','item-partial-return-cross-repo-e2e',102,
+            '11111111-1111-1111-1111-111111111111','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',1000,'batch','sale_issue'
+          );
+          SQL
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-08-canonical-pos-orders.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-08-pos-cashier-audit.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-09-pos-sale-returned.sql
@@ -248,6 +277,8 @@ jobs:
           assert_one "SELECT COUNT(*) FROM pos_sale_payments WHERE order_id='ord-partial-return-cross-repo-e2e' AND direction='out' AND status='refunded' AND amount_minor=2500" "central proportional payment reversal"
           assert_one "SELECT COUNT(*) FROM pos_inventory_movements WHERE order_id='ord-partial-return-cross-repo-e2e' AND movement_type='sale_return' AND quantity_delta_milli=250" "central partial inventory restoration"
           assert_one "SELECT COUNT(*) FROM products WHERE id=102 AND stock_quantity=4.250" "canonical product stock restoration"
+          assert_one "SELECT COUNT(*) FROM batches WHERE id='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' AND quantity_remaining=4.250" "canonical partial batch stock restoration"
+          assert_one "SELECT COUNT(*) FROM pos_inventory_batch_allocations WHERE order_id='ord-partial-return-cross-repo-e2e' AND order_item_id='item-partial-return-cross-repo-e2e' AND source_movement_type='sale_return' AND allocation_kind='batch' AND quantity_milli=250" "partial return original-batch restoration ledger"
 
       - name: Show backend log on failure
         if: failure()
