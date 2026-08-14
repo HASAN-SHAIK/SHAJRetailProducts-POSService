@@ -87,3 +87,20 @@ func TestLoadRequiresSyncCredentialsWhenCentralAPIConfigured(t *testing.T) {
 		t.Fatal("Load() returned nil error")
 	}
 }
+
+func TestLoadWrapsBase64OfflineGrantPublicKey(t *testing.T) {
+	t.Setenv("POS_LISTEN_ADDRESS", "127.0.0.1:4792")
+	t.Setenv("POS_SQLITE_PATH", "./data/test-pos.db")
+	t.Setenv("POS_CENTRAL_API_URL", "")
+	t.Setenv("POS_OFFLINE_GRANT_PUBLIC_KEY", "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	want := "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A\n-----END PUBLIC KEY-----"
+	if cfg.OfflineGrantSecret != want {
+		t.Fatalf("OfflineGrantSecret = %q", cfg.OfflineGrantSecret)
+	}
+}
