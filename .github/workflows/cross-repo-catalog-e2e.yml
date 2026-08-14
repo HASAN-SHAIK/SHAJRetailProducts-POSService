@@ -100,6 +100,8 @@ jobs:
             category TEXT,
             stock_quantity NUMERIC(14,3) NOT NULL DEFAULT 0,
             branch_id UUID,
+            hsn_code VARCHAR(20),
+            gst_percentage NUMERIC(5,2),
             is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -140,6 +142,8 @@ jobs:
             category TEXT,
             stock_quantity NUMERIC(14,3) NOT NULL DEFAULT 0,
             branch_id UUID,
+            hsn_code VARCHAR(20),
+            gst_percentage NUMERIC(5,2),
             is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
