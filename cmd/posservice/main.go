@@ -41,6 +41,10 @@ func main() {
     localAuth, err := security.LoadOrCreate(identity.DeviceID, cfg.LocalAPIToken, cfg.LocalTokenFile, cfg.AllowedOrigins); if err != nil { slog.Error("initialize local API security", "error", err); os.Exit(1) }
 
     catalogRepository := catalog.NewRepository(db); customerRepository := customer.NewRepository(db); orderService := orders.New(db, catalogRepository)
+    effectiveConfigStore := effectiveconfig.NewStore(db)
+    orderService.SetPriceOverridePolicy(func(ctx context.Context) (bool, error) {
+        return effectiveConfigStore.Bool(ctx, "billing.allow_price_override", false)
+    })
     paymentService := payments.New(db); inventoryService := inventory.New(db); receiptService := receipts.New(db)
     app := server.NewSecure(cfg, db, deviceService, catalogRepository, customerRepository, orderService, paymentService, inventoryService, receiptService, localAuth)
 
@@ -53,7 +57,7 @@ func main() {
         changePuller = changefeed.New(db, inboxService, cfg.CentralAPIURL, cfg.CentralTenantID, cfg.CentralSyncToken, identity.DeviceID, cfg.SyncRequestTimeout, cfg.SyncPollInterval)
         configClient, configErr := effectiveconfig.NewClient(cfg.CentralAPIURL, cfg.CentralTenantID, identity.DeviceID, cfg.CentralSyncToken, cfg.SyncRequestTimeout)
         if configErr != nil { slog.Error("configure effective configuration sync", "error", configErr); os.Exit(1) }
-        effectiveConfigService = effectiveconfig.NewService(effectiveconfig.NewStore(db), configClient, slog.Default(), time.Minute)
+        effectiveConfigService = effectiveconfig.NewService(effectiveConfigStore, configClient, slog.Default(), time.Minute)
     } else { slog.Info("central sync disabled", "reason", "POS_CENTRAL_API_URL is not configured") }
     backupService := backup.New(db, cfg.BackupDirectory, cfg.BackupRetention)
     diagnostics := observability.New(db, eventOutbox, cfg.BackupDirectory)
