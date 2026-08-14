@@ -29,6 +29,7 @@ type Service struct {
 	catalog             *catalog.Repository
 	priceOverridePolicy func(context.Context) (bool, error)
 	discountPolicy      func(context.Context) (DiscountPolicy, error)
+	taxPolicy           func(context.Context) (TaxPolicy, error)
 }
 
 func New(db *database.DB, catalogRepository *catalog.Repository) *Service {
@@ -41,6 +42,10 @@ func (s *Service) SetPriceOverridePolicy(policy func(context.Context) (bool, err
 
 func (s *Service) SetDiscountPolicy(policy func(context.Context) (DiscountPolicy, error)) {
 	s.discountPolicy = policy
+}
+
+func (s *Service) SetTaxPolicy(policy func(context.Context) (TaxPolicy, error)) {
+	s.taxPolicy = policy
 }
 
 type CreateInput struct {
@@ -163,6 +168,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 	var built []Item
 	var subtotal, discount, tax, total int64
 	var resolvedDiscountPolicy *DiscountPolicy
+	var resolvedTaxPolicy *TaxPolicy
 
 	for i, in := range input.Items {
 		productID := in.ProductID.String()
@@ -218,7 +224,25 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 				return Order{}, ErrInvalidOrder
 			}
 		}
-		lineTotal := gross - in.DiscountMinor + in.TaxMinor
+		taxable := gross - in.DiscountMinor
+		if taxable < 0 {
+			return Order{}, ErrInvalidOrder
+		}
+		lineTax := in.TaxMinor
+		lineTotal := taxable + lineTax
+		if s.taxPolicy != nil {
+			if resolvedTaxPolicy == nil {
+				policy, policyErr := s.taxPolicy(ctx)
+				if policyErr != nil {
+					return Order{}, fmt.Errorf("load tax policy: %w", policyErr)
+				}
+				resolvedTaxPolicy = &policy
+			}
+			lineTax, lineTotal, err = calculateTax(*resolvedTaxPolicy, taxable, product.GSTRateBps)
+			if err != nil {
+				return Order{}, err
+			}
+		}
 		if lineTotal < 0 {
 			return Order{}, ErrInvalidOrder
 		}
@@ -229,11 +253,11 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 		built = append(built, Item{
 			ID: newID("itm"), LineNo: i + 1, ProductID: product.ID, SKU: product.SKU, ProductName: product.Name,
 			Barcode: barcode, QuantityMilli: in.QuantityMilli, UnitPriceMinor: price, DiscountMinor: in.DiscountMinor,
-			TaxMinor: in.TaxMinor, LineTotalMinor: lineTotal, TaxCode: product.TaxCode,
+			TaxMinor: lineTax, LineTotalMinor: lineTotal, TaxCode: product.TaxCode,
 		})
 		subtotal += gross
 		discount += in.DiscountMinor
-		tax += in.TaxMinor
+		tax += lineTax
 		total += lineTotal
 	}
 
