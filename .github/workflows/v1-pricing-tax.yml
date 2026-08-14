@@ -7,6 +7,7 @@ on:
       - 'cmd/posservice/main.go'
       - 'internal/orders/orders.go'
       - 'internal/orders/manual_price_policy_v1_test.go'
+      - 'internal/catalog/pricing_precedence_v1_test.go'
       - 'internal/effectiveconfig/store.go'
       - 'internal/effectiveconfig/pricing_policy_v1_test.go'
       - 'docs/V1_PRICING_TAX_ACCEPTANCE_MATRIX.md'
@@ -27,6 +28,6 @@ jobs:
           go-version: '1.23.x'
           cache: true
       - name: Run V1 pricing policy acceptance
-        run: go test ./internal/orders ./internal/effectiveconfig
+        run: go test ./internal/orders ./internal/catalog ./internal/effectiveconfig
       - name: Build packaged POS runtime
         run: go build ./cmd/posservice
