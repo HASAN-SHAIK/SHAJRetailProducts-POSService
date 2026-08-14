@@ -15,6 +15,7 @@ import (
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/customer"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/device"
+    "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/effectiveconfig"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/inbox"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/inventory"
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/observability"
@@ -47,8 +48,12 @@ func main() {
     syncEngine, err := syncengine.New(eventOutbox, cfg.CentralAPIURL, cfg.CentralTenantID, cfg.CentralSyncToken, identity.DeviceID, cfg.SyncRequestTimeout, cfg.SyncPollInterval); if err != nil { slog.Error("configure sync engine", "error", err); os.Exit(1) }
     inboxService := inbox.New(db)
     var changePuller *changefeed.Puller
+    var effectiveConfigService *effectiveconfig.Service
     if cfg.CentralAPIURL != "" {
         changePuller = changefeed.New(db, inboxService, cfg.CentralAPIURL, cfg.CentralTenantID, cfg.CentralSyncToken, identity.DeviceID, cfg.SyncRequestTimeout, cfg.SyncPollInterval)
+        configClient, configErr := effectiveconfig.NewClient(cfg.CentralAPIURL, cfg.CentralTenantID, identity.DeviceID, cfg.CentralSyncToken, cfg.SyncRequestTimeout)
+        if configErr != nil { slog.Error("configure effective configuration sync", "error", configErr); os.Exit(1) }
+        effectiveConfigService = effectiveconfig.NewService(effectiveconfig.NewStore(db), configClient, slog.Default(), time.Minute)
     } else { slog.Info("central sync disabled", "reason", "POS_CENTRAL_API_URL is not configured") }
     backupService := backup.New(db, cfg.BackupDirectory, cfg.BackupRetention)
     diagnostics := observability.New(db, eventOutbox, cfg.BackupDirectory)
@@ -56,6 +61,7 @@ func main() {
     ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM); defer stop()
     if syncEngine != nil { go syncEngine.Run(ctx) }
     if changePuller != nil { go changePuller.Run(ctx) }
+    if effectiveConfigService != nil && effectiveConfigService.Enabled() { go effectiveConfigService.Run(ctx) }
     go backupService.Run(ctx, cfg.BackupInterval)
     go diagnostics.Run(ctx, cfg.ObservabilityInterval)
     go func() { slog.Info("starting POS service", "address", cfg.ListenAddress, "database", cfg.DatabasePath); if err := app.Start(); err != nil { slog.Error("POS service stopped unexpectedly", "error", err); stop() } }()

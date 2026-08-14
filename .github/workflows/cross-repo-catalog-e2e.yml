@@ -1,0 +1,270 @@
+name: Cross-repo Catalog E2E
+
+on:
+  pull_request:
+    paths:
+      - 'internal/changefeed/real_catalog_central_e2e_test.go'
+      - 'internal/inbox/inbox.go'
+      - 'internal/inbox/barcode_replacement_v1_test.go'
+      - 'internal/inbox/product_removal_v1_test.go'
+      - '.github/workflows/cross-repo-catalog-e2e.yml'
+      - 'docs/V1_PRODUCTS_CATALOG_ACCEPTANCE_MATRIX.md'
+
+jobs:
+  catalog-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGPASSWORD: postgres
+      MASTER_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/masterdb
+      TENANT_DATABASE_URL_TEMPLATE: postgres://postgres:postgres@127.0.0.1:5432/{db}
+      DB_SSL: 'false'
+      POS_SYNC_TOKENS_JSON: '{"tenant-e2e":"sync-secret","tenant-two":"sync-secret-two"}'
+      POS_SYNC_TENANT_ID: tenant-e2e
+      POS_SYNC_TOKEN: sync-secret
+      POS_E2E_CENTRAL_URL: http://127.0.0.1:5001
+      POS_E2E_TENANT_ID: tenant-e2e
+      POS_E2E_SYNC_TOKEN: sync-secret
+      POS_E2E_DEVICE_ID: device-e2e
+
+    steps:
+      - name: Checkout POS Service
+        uses: actions/checkout@v4
+
+      - name: Checkout merged Backend main
+        uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Backend
+          ref: main
+          path: backend
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Create real master and isolated tenant PostgreSQL catalog databases
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE DATABASE masterdb;
+          CREATE DATABASE tenant_e2e;
+          CREATE DATABASE tenant_two;
+          SQL
+
+          psql -h 127.0.0.1 -U postgres -d masterdb -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE tenants (
+            id TEXT PRIMARY KEY,
+            shop_name TEXT,
+            owner_name TEXT,
+            email TEXT,
+            mobile TEXT,
+            plan_type TEXT,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            addons JSONB NOT NULL DEFAULT '{}'::jsonb,
+            gst_mode TEXT,
+            database_name TEXT NOT NULL
+          );
+          INSERT INTO tenants(id,shop_name,owner_name,email,mobile,plan_type,is_active,addons,gst_mode,database_name)
+          VALUES
+          ('tenant-e2e','Catalog E2E Shop','E2E Owner','e2e@example.test','0000000000','pro',TRUE,'{}'::jsonb,'INCLUSIVE','tenant_e2e'),
+          ('tenant-two','Tenant Two Shop','Tenant Two Owner','two@example.test','1111111111','pro',TRUE,'{}'::jsonb,'INCLUSIVE','tenant_two');
+          SQL
+
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE products (
+            id BIGINT PRIMARY KEY,
+            name TEXT NOT NULL,
+            barcode TEXT,
+            selling_price NUMERIC(14,2),
+            category TEXT,
+            stock_quantity NUMERIC(14,3) NOT NULL DEFAULT 0,
+            branch_id UUID,
+            is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          INSERT INTO products(id,name,barcode,selling_price,category,stock_quantity,branch_id,is_deleted,created_at,updated_at)
+          VALUES
+          (101,'Fresh Milk','8901234567890',65.50,'Fresh Produce & Dairy',5.000,'11111111-1111-1111-1111-111111111111',FALSE,'2026-08-14T06:30:00Z','2026-08-14T06:30:00Z'),
+          (202,'Branch B Secret Product','8901234567202',99.00,'Branch B Only',7.000,'22222222-2222-2222-2222-222222222222',FALSE,'2026-08-14T06:30:00Z','2026-08-14T06:30:00Z');
+
+          CREATE TABLE customers (
+            id BIGINT PRIMARY KEY,
+            name TEXT NOT NULL,
+            phone TEXT,
+            mobile TEXT,
+            credit_limit NUMERIC(14,2) NOT NULL DEFAULT 0,
+            current_balance NUMERIC(14,2) NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE TABLE branch_devices (
+            id UUID PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            branch_id UUID NOT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          INSERT INTO branch_devices(id,device_id,branch_id,is_active,created_at)
+          VALUES('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','device-e2e','11111111-1111-1111-1111-111111111111',TRUE,NOW());
+          SQL
+
+          psql -h 127.0.0.1 -U postgres -d tenant_two -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE products (
+            id BIGINT PRIMARY KEY,
+            name TEXT NOT NULL,
+            barcode TEXT,
+            selling_price NUMERIC(14,2),
+            category TEXT,
+            stock_quantity NUMERIC(14,3) NOT NULL DEFAULT 0,
+            branch_id UUID,
+            is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          INSERT INTO products(id,name,barcode,selling_price,category,stock_quantity,branch_id,is_deleted,created_at,updated_at)
+          VALUES(303,'Tenant Two Product','8901234567303',123.45,'Tenant Two Category',9.000,'33333333-3333-3333-3333-333333333333',FALSE,'2026-08-14T06:30:00Z','2026-08-14T06:30:00Z');
+
+          CREATE TABLE customers (
+            id BIGINT PRIMARY KEY,
+            name TEXT NOT NULL,
+            phone TEXT,
+            mobile TEXT,
+            credit_limit NUMERIC(14,2) NOT NULL DEFAULT 0,
+            current_balance NUMERIC(14,2) NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+
+          CREATE TABLE branch_devices (
+            id UUID PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            branch_id UUID NOT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          INSERT INTO branch_devices(id,device_id,branch_id,is_active,created_at)
+          VALUES('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb','device-two','33333333-3333-3333-3333-333333333333',TRUE,NOW());
+          SQL
+
+      - name: Install backend runtime dependencies
+        working-directory: backend
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Start production Central POS change-feed route with local E2E mutator
+        run: |
+          cat > backend/e2e-pos-catalog-server.js <<'NODE'
+          const express = require('express');
+          const { Pool } = require('pg');
+          const router = require('./src/api/v1/modules/sync/posSync.routes');
+          const app = express();
+          const tenantPool = new Pool({ connectionString: 'postgres://postgres:postgres@127.0.0.1:5432/tenant_e2e' });
+          app.use(express.json({ limit: '5mb' }));
+          app.post('/e2e/catalog/:state', async (req, res, next) => {
+            try {
+              if (req.params.state === 'barcode') {
+                await tenantPool.query(`UPDATE products SET barcode='8901234567891', updated_at='2026-08-14T06:31:00Z' WHERE id=101`);
+              } else if (req.params.state === 'rename') {
+                await tenantPool.query(`UPDATE products SET category='New Dairy', updated_at='2026-08-14T06:32:00Z' WHERE id=101`);
+              } else if (req.params.state === 'clear') {
+                await tenantPool.query(`UPDATE products SET category=NULL, updated_at='2026-08-14T06:33:00Z' WHERE id=101`);
+              } else if (req.params.state === 'reassign') {
+                await tenantPool.query(`UPDATE products SET branch_id='22222222-2222-2222-2222-222222222222', updated_at='2026-08-14T06:34:00Z' WHERE id=101`);
+              } else if (req.params.state === 'return') {
+                await tenantPool.query(`UPDATE products SET branch_id='11111111-1111-1111-1111-111111111111', updated_at='2026-08-14T06:35:00Z' WHERE id=101`);
+              } else if (req.params.state === 'deactivate') {
+                await tenantPool.query(`UPDATE products SET is_deleted=TRUE, updated_at='2026-08-14T06:36:00Z' WHERE id=101`);
+              } else {
+                return res.status(400).json({ code: 'UNKNOWN_STATE' });
+              }
+              res.status(204).end();
+            } catch (error) { next(error); }
+          });
+          app.use('/api/v1/sync', router);
+          app.use((error, req, res, next) => {
+            console.error(error);
+            res.status(500).json({ code: error.code || 'E2E_SERVER_ERROR', message: error.message });
+          });
+          const server = app.listen(5001, '127.0.0.1');
+          const shutdown = () => server.close(async () => { await tenantPool.end(); process.exit(0); });
+          process.on('SIGTERM', shutdown);
+          process.on('SIGINT', shutdown);
+          NODE
+
+          node backend/e2e-pos-catalog-server.js >/tmp/pos-central-catalog-e2e.log 2>&1 &
+          echo $! >/tmp/pos-central-catalog-e2e.pid
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' 'http://127.0.0.1:5001/api/v1/sync/changes' || true)
+            if [ "$code" = "401" ]; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/pos-central-catalog-e2e.log
+          exit 1
+
+      - name: Prove tenant token and database isolation on production change-feed route
+        run: |
+          tenant_a=$(curl -fsS \
+            -H 'X-POS-Tenant-ID: tenant-e2e' \
+            -H 'X-POS-Device-ID: device-e2e' \
+            -H 'X-POS-Sync-Token: sync-secret' \
+            'http://127.0.0.1:5001/api/v1/sync/changes?limit=20')
+          echo "$tenant_a" | jq -e '[.changes[] | select(.type == "catalog.product.upsert" and .payload.id == "101")] | length == 1'
+          echo "$tenant_a" | jq -e '[.changes[] | select(.payload.id? == "303" or .payload.product_id? == "303")] | length == 0'
+
+          tenant_b=$(curl -fsS \
+            -H 'X-POS-Tenant-ID: tenant-two' \
+            -H 'X-POS-Device-ID: device-two' \
+            -H 'X-POS-Sync-Token: sync-secret-two' \
+            'http://127.0.0.1:5001/api/v1/sync/changes?limit=20')
+          echo "$tenant_b" | jq -e '[.changes[] | select(.type == "catalog.product.upsert" and .payload.id == "303")] | length == 1'
+          echo "$tenant_b" | jq -e '[.changes[] | select(.payload.id? == "101" or .payload.product_id? == "101")] | length == 0'
+
+          wrong_status=$(curl -sS -o /tmp/cross-tenant-wrong-token.json -w '%{http_code}' \
+            -H 'X-POS-Tenant-ID: tenant-two' \
+            -H 'X-POS-Device-ID: device-two' \
+            -H 'X-POS-Sync-Token: sync-secret' \
+            'http://127.0.0.1:5001/api/v1/sync/changes?limit=20')
+          test "$wrong_status" = '401'
+          jq -e '.code == "POS_SYNC_UNAUTHORIZED"' /tmp/cross-tenant-wrong-token.json
+
+      - name: Pull branch-scoped, mutate, reassign and deactivate Central catalog through SQLite
+        run: CGO_ENABLED=1 go test ./internal/changefeed -run '^TestRealCentralCatalogConvergenceE2E$' -count=1 -v
+
+      - name: Run focused primary barcode replacement acceptance
+        run: CGO_ENABLED=1 go test ./internal/inbox -run '^TestV1PrimaryBarcodeReplacementRemovesStalePrimary$' -count=1 -v
+
+      - name: Run focused product removal acceptance
+        run: CGO_ENABLED=1 go test ./internal/inbox -run '^TestV1ProductRemovalDeactivatesAndCleansLookupFacts$' -count=1 -v
+
+      - name: Show backend log on failure
+        if: failure()
+        run: cat /tmp/pos-central-catalog-e2e.log || true
+
+      - name: Stop E2E backend
+        if: always()
+        run: |
+          if [ -f /tmp/pos-central-catalog-e2e.pid ]; then kill "$(cat /tmp/pos-central-catalog-e2e.pid)" || true; fi
