@@ -48,18 +48,16 @@ func TestV1ProductGSTProjectionRejectsInvalidRate(t *testing.T) {
     db := testutil.OpenDatabase(t)
     svc := New(db)
 
-    payload := json.RawMessage(`{"id":"bad-tax","name":"Bad Tax","gst_rate_percent":101,"is_active":true,"version":1}`)
-    // json.RawMessage above is intentionally replaced with valid JSON below so the
-    // assertion exercises GST-rate validation rather than generic JSON validation.
-    payload = json.RawMessage(`{"id":"bad-tax"}`)
-    payload, _ = json.Marshal(map[string]any{
+    payload, err := json.Marshal(map[string]any{
         "id": "bad-tax",
         "name": "Bad Tax",
         "gst_rate_percent": 101,
         "is_active": true,
         "version": 1,
     })
-    err := svc.Apply(ctx, Message{ID: "bad-tax-v1", Type: "catalog.product.upsert", SchemaVersion: 1, Source: "central", Payload: payload})
+    if err != nil { t.Fatal(err) }
+
+    err = svc.Apply(ctx, Message{ID: "bad-tax-v1", Type: "catalog.product.upsert", SchemaVersion: 1, Source: "central", Payload: payload})
     if err == nil { t.Fatal("expected invalid GST rate to fail") }
 
     var count int
