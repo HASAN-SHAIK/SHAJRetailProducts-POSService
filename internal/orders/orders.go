@@ -20,12 +20,17 @@ var (
 )
 
 type Service struct {
-	db      *database.DB
-	catalog *catalog.Repository
+	db                  *database.DB
+	catalog             *catalog.Repository
+	priceOverridePolicy func(context.Context) (bool, error)
 }
 
 func New(db *database.DB, catalogRepository *catalog.Repository) *Service {
 	return &Service{db: db, catalog: catalogRepository}
+}
+
+func (s *Service) SetPriceOverridePolicy(policy func(context.Context) (bool, error)) {
+	s.priceOverridePolicy = policy
 }
 
 type CreateInput struct {
@@ -159,8 +164,22 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 		}
 		price := int64(0)
 		if in.UnitPriceMinor != nil {
-			if *in.UnitPriceMinor < 0 || (!product.AllowManualPrice && product.Price != nil && *in.UnitPriceMinor != product.Price.AmountMinor) {
+			if *in.UnitPriceMinor < 0 {
 				return Order{}, ErrInvalidOrder
+			}
+			isOverride := product.Price == nil || *in.UnitPriceMinor != product.Price.AmountMinor
+			if isOverride {
+				allowed := product.AllowManualPrice
+				if s.priceOverridePolicy != nil {
+					policyAllowed, policyErr := s.priceOverridePolicy(ctx)
+					if policyErr != nil {
+						return Order{}, fmt.Errorf("load price override policy: %w", policyErr)
+					}
+					allowed = allowed && policyAllowed
+				}
+				if !allowed {
+					return Order{}, ErrInvalidOrder
+				}
 			}
 			price = *in.UnitPriceMinor
 		} else if product.Price != nil {
