@@ -20,7 +20,8 @@
 - The merged cross-repository inventory acceptance covers SQLite persistence across restart, durable outbox reconnect, duplicate delivery, lost acknowledgement, and canonical PostgreSQL convergence.
 - POSService #141 explicitly certifies the V1 provisional-negative policy: without an authoritative Central inventory initialization marker, POS must not reject a tracked sale solely because local stock truth is absent/stale. The edge records the provisional negative balance, immutable sale movement, and durable inventory outbox fact for Central convergence.
 - POSService #144 certifies sale, full-refund, and partial-return batch convergence against merged Backend `main`, including restarted SQLite/outbox replay and original-batch restoration.
-- Focused operator-visibility acceptance correlates the store-scoped local balance and immutable inventory movement with its failed/pending durable outbox fact, including attempts and last error, so the operator can distinguish local stock truth from Central convergence state without gaining recovery authority.
+- POSService #146 certifies operator visibility by correlating store-scoped local balance and immutable movement facts with durable sync state, attempts, and last error without granting force-recovery authority.
+- POSService #147 certifies the final support-reconciliation path against merged Backend `main` using real PostgreSQL plus restarted SQLite durable-outbox replay.
 
 ### Central
 
@@ -32,6 +33,7 @@
 - Backend #28 fixes stock-read branch isolation by resolving the caller's branch authority before query execution: restricted staff are pinned to their assigned branch, while privileged callers retain explicit-branch and all-branch reads. Focused acceptance executes these cases without requiring a live PostgreSQL connection.
 - Backend #32 adds the Central-authoritative POS batch-allocation ledger. Batch-enabled `sale_issue` movements allocate FIFO within the trusted registered-device branch, provisional oversell is recorded as an explicit unallocated deficit rather than a fabricated batch, and full/partial `sale_return` restores only the original outstanding allocation. Batch quantity mutations preserve POS milli precision.
 - Backend #33 maps POS inventory mutations into the existing stock-audit context with transaction-local `source=pos_sync`, immutable movement reference, registered device actor, and explicit `sale`/`refund` reasons while preserving duplicate/exactly-once handling.
+- Backend #34 adds the read-only platform-admin reconciliation view under the existing Central admin boundary. Canonical movement application persists trusted registered-device/branch provenance, and support can correlate POS movement identity and balance-after truth with canonical application state, Central product stock, branch/device provenance, and batch-allocation facts without obtaining mutation or recovery authority.
 
 ## Acceptance matrix
 
@@ -55,8 +57,8 @@
 | Store/branch isolation | Inventory mutation/read cannot cross tenant or branch/store authority boundary | CERTIFIED — existing mutation paths enforce branch ownership and Backend #28 fixes/acceptance-certifies restricted stock reads while preserving privileged explicit/all-branch behavior |
 | Negative stock / oversell | V1 policy is explicit and consistently enforced online/offline; no accidental policy emerges from implementation | CERTIFIED — POSService #141 makes the existing architecture explicit: when POS has no authoritative initialized stock truth, tracked sales may create a provisional negative local balance online/offline, but the sale movement and durable outbox fact are mandatory so Central remains canonical and reconciliation can surface divergence; hard edge blocking is deferred until authoritative Central -> POS inventory initialization exists |
 | Batch inventory | Batch-enabled products reconcile product total and batch remaining quantity across receiving/sale/return | CERTIFIED — Backend #32 plus POSService #144 certify trusted-branch FIFO sale allocation, exactly-once product+batch convergence, original-batch full-refund restoration, partial-return restoration, and provisional unallocated deficit handling |
-| Cashier/operator visibility | Cashier can distinguish local available stock, pending Central convergence, blocked sync, and recovered/synced state where relevant | CERTIFIED — existing store-scoped balance/movement reads plus sync diagnostics expose local available stock and durable event state; focused SQLite acceptance correlates an immutable movement with its failed convergence fact, attempts, and last error without adding force-recovery authority |
-| Reconciliation | Support/admin can compare POS movement IDs/balances with Central canonical facts and identify divergence | GAP |
+| Cashier/operator visibility | Cashier can distinguish local available stock, pending Central convergence, blocked sync, and recovered/synced state where relevant | CERTIFIED — existing store-scoped balance/movement reads plus sync diagnostics expose local available stock and durable event state; POSService #146 correlates an immutable movement with its failed convergence fact, attempts, and last error without adding force-recovery authority |
+| Reconciliation | Support/admin can compare POS movement IDs/balances with Central canonical facts and identify divergence | CERTIFIED — Backend #34 persists trusted device/branch provenance and exposes a read-only platform-admin reconciliation query; POSService #147 validates real SQLite -> durable outbox -> Central/PostgreSQL convergence and correlates POS balance-after/movement identity with canonical stock and batch allocation facts |
 
 ## Release criteria
 
@@ -64,9 +66,13 @@ Inventory V1 is release-certified only when all matrix rows are either `CERTIFIE
 
 No additional manager-approval semantics should be added unless inventory acceptance exposes an actual authorization defect.
 
+## Release decision
+
+**Inventory V1 RELEASE-CERTIFIED.** Every acceptance-matrix row is `CERTIFIED`. The release boundary keeps Central/PostgreSQL canonical, POS/SQLite offline and replay-safe, and Frontend/operator surfaces read-only with respect to recovery and canonical stock correction. Inventory semantics are frozen after this certification except for defects discovered by later V1 integration work.
+
 ## Ordered implementation priorities
 
-1. Add focused support/admin reconciliation between POS movement facts and Central canonical application/batch facts.
-2. Run final Inventory V1 release certification and freeze the domain except for defects.
+1. Freeze Inventory V1 except for defects.
+2. Proceed to Products/Catalog V1 acceptance and implementation.
 
-Transaction Core V1 is frozen except for defects discovered by this matrix.
+Transaction Core V1 remains frozen except for defects discovered by later V1 integration work.
