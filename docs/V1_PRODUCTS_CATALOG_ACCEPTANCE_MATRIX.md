@@ -33,7 +33,7 @@ Inventory V1 is release-certified and frozen except for real defects. Pricing/pr
 | HSN/GST/cess transport | PARTIAL | Central owns HSN/GST/cess product facts, while current POS product projection does not carry an equivalent authoritative tax model. Exact taxation behavior is finalized in Pricing/Tax V1. |
 | Batch-enabled catalog flag | N/A | Central batch allocation/convergence is already Inventory V1 authority; POS does not need to become batch-allocation authority. Re-open only if a cashier/catalog defect proves the flag is required locally. |
 | Manual-price flag | N/A | Current Central product authority does not own a canonical manual-price flag. Pricing V1 will define any such permission/policy. |
-| Product import -> canonical catalog | PARTIAL | Central `imports.service` inserts/updates the canonical `products` table and the current Frontend uses the Central import API. Needs executable import -> Central change feed -> POS SQLite convergence acceptance. |
+| Product import -> canonical catalog | CERTIFIED | Backend #40 certifies Frontend-shaped import rows become one branch-scoped canonical Central product/batch and re-import updates rather than duplicates. POSService #163 proves the merged Central import path through PostgreSQL, authenticated change feed, transactional POS inbox/SQLite, and offline barcode/name/effective-price lookup. |
 | Transactional POS inbox application | CERTIFIED | Existing POS inbox applies supported Central catalog messages in one SQLite transaction and records applied/failed state with duplicate-message idempotency. |
 | Version monotonicity | CERTIFIED | POS product/category/price upserts and branch-removal tombstones reject older versions; category snapshots also preserve newer category facts. |
 | Tenant isolation | CERTIFIED | POSService #161 runs the production authenticated Central route against two independent tenant PostgreSQL databases and registered devices: tenant A sees only tenant-A catalog facts, tenant B sees only tenant-B facts, and a tenant-A token is rejected when presented for tenant B. |
@@ -41,9 +41,8 @@ Inventory V1 is release-certified and frozen except for real defects. Pricing/pr
 
 ## Ordered closure work
 
-1. Certify Frontend/Backend product import -> canonical Central product -> POS convergence without introducing client catalog authority.
-2. Resolve authoritative UOM/weight semantics only if required for V1 cashier correctness; otherwise move the exact tax/UOM transport boundary into Pricing/Tax V1 with executable boundary acceptance.
-3. Certify catalog-specific failure/diagnostic visibility and run final Products/Catalog release acceptance.
+1. Resolve authoritative UOM/weight semantics only if required for V1 cashier correctness; otherwise move the exact tax/UOM transport boundary into Pricing/Tax V1 with executable boundary acceptance.
+2. Certify catalog-specific failure/diagnostic visibility and run final Products/Catalog release acceptance.
 
 ## Release rule
 
