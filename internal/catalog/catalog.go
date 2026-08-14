@@ -21,6 +21,7 @@ type Product struct {
 	Description      *string  `json:"description,omitempty"`
 	UnitOfMeasure    *string  `json:"unit_of_measure,omitempty"`
 	TaxCode          *string  `json:"tax_code,omitempty"`
+	GSTRateBps       *int64   `json:"gst_rate_bps,omitempty"`
 	IsActive         bool     `json:"is_active"`
 	AllowManualPrice bool     `json:"allow_manual_price"`
 	TrackInventory   bool     `json:"track_inventory"`
@@ -50,7 +51,7 @@ func NewRepository(db *database.DB) *Repository { return &Repository{db: db} }
 
 func (r *Repository) GetProduct(ctx context.Context, id, storeID string) (Product, error) {
 	row := r.db.SQL().QueryRowContext(ctx, `
-        SELECT id, category_id, sku, name, description, unit_of_measure, tax_code,
+        SELECT id, category_id, sku, name, description, unit_of_measure, tax_code, gst_rate_bps,
                is_active, allow_manual_price, track_inventory
         FROM catalog_products
         WHERE id = ?`, id)
@@ -73,7 +74,7 @@ func (r *Repository) GetByBarcode(ctx context.Context, barcode, storeID string) 
 		return Product{}, ErrNotFound
 	}
 	row := r.db.SQL().QueryRowContext(ctx, `
-        SELECT p.id, p.category_id, p.sku, p.name, p.description, p.unit_of_measure, p.tax_code,
+        SELECT p.id, p.category_id, p.sku, p.name, p.description, p.unit_of_measure, p.tax_code, p.gst_rate_bps,
                p.is_active, p.allow_manual_price, p.track_inventory
         FROM catalog_products p
         JOIN catalog_barcodes b ON b.product_id = p.id
@@ -98,7 +99,7 @@ func (r *Repository) Search(ctx context.Context, query, storeID string, limit in
 	}
 	like := "%" + query + "%"
 	rows, err := r.db.SQL().QueryContext(ctx, `
-        SELECT DISTINCT p.id, p.category_id, p.sku, p.name, p.description, p.unit_of_measure, p.tax_code,
+        SELECT DISTINCT p.id, p.category_id, p.sku, p.name, p.description, p.unit_of_measure, p.tax_code, p.gst_rate_bps,
                p.is_active, p.allow_manual_price, p.track_inventory
         FROM catalog_products p
         LEFT JOIN catalog_barcodes b ON b.product_id = p.id
@@ -192,9 +193,14 @@ type scanner interface{ Scan(dest ...any) error }
 
 func scanProduct(s scanner) (Product, error) {
 	var p Product
+	var gstRate sql.NullInt64
 	var active, manual, inventory int
-	if err := s.Scan(&p.ID, &p.CategoryID, &p.SKU, &p.Name, &p.Description, &p.UnitOfMeasure, &p.TaxCode, &active, &manual, &inventory); err != nil {
+	if err := s.Scan(&p.ID, &p.CategoryID, &p.SKU, &p.Name, &p.Description, &p.UnitOfMeasure, &p.TaxCode, &gstRate, &active, &manual, &inventory); err != nil {
 		return Product{}, err
+	}
+	if gstRate.Valid {
+		value := gstRate.Int64
+		p.GSTRateBps = &value
 	}
 	p.IsActive = active == 1
 	p.AllowManualPrice = manual == 1
