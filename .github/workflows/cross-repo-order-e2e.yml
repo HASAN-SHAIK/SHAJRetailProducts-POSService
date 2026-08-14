@@ -154,7 +154,7 @@ jobs:
       - name: Dispatch SQLite outbox to real central API and replay
         run: CGO_ENABLED=1 go test ./internal/syncengine -run '^TestRealCentralOrderE2E$' -count=1 -v
 
-      - name: Verify exactly-once PostgreSQL projections
+      - name: Verify exactly-once PostgreSQL projections and pricing snapshots
         run: |
           assert_one() {
             local sql="$1"
@@ -174,6 +174,11 @@ jobs:
           assert_one "SELECT COUNT(*) FROM pos_sale_receipts WHERE order_id='ord-cross-repo-e2e' AND receipt_id='rcpt-cross-repo-e2e'" "receipt"
           assert_one "SELECT COUNT(*) FROM pos_inventory_movements WHERE order_id='ord-cross-repo-e2e' AND movement_id='mov-cross-repo-e2e'" "inventory movement"
           assert_one "SELECT COUNT(*) FROM orders WHERE source_channel='pos' AND source_order_id='ord-cross-repo-e2e'" "canonical order"
+
+          assert_one "SELECT COUNT(*) FROM pos_sales WHERE order_id='ord-cross-repo-e2e' AND subtotal_minor=12500 AND discount_minor=500 AND tax_minor=2160 AND total_minor=14160" "POS sale pricing snapshot"
+          assert_one "SELECT COUNT(*) FROM pos_sale_items WHERE item_id='itm-cross-repo-e2e' AND unit_price_minor=12500 AND discount_minor=500 AND tax_minor=2160 AND line_total_minor=14160 AND tax_code='HSN0401'" "POS sale item pricing snapshot"
+          assert_one "SELECT COUNT(*) FROM orders WHERE source_channel='pos' AND source_order_id='ord-cross-repo-e2e' AND subtotal_minor=12500 AND discount_minor=500 AND tax_minor=2160 AND total_minor=14160 AND total_price=141.60" "canonical order pricing snapshot"
+          assert_one "SELECT COUNT(*) FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE o.source_channel='pos' AND o.source_order_id='ord-cross-repo-e2e' AND oi.unit_price_minor=12500 AND oi.source_discount_minor=500 AND oi.tax_minor=2160 AND oi.line_total_minor=14160 AND oi.tax_code='HSN0401'" "canonical order item pricing snapshot"
 
       - name: Show backend log on failure
         if: failure()
