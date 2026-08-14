@@ -44,11 +44,11 @@ jobs:
       - name: Checkout POS Service
         uses: actions/checkout@v4
 
-      - name: Checkout Backend branch under certification
+      - name: Checkout merged Backend main
         uses: actions/checkout@v4
         with:
           repository: HASAN-SHAIK/SHAJRetailProducts-Backend
-          ref: v1/catalog-device-branch-isolation
+          ref: main
           path: backend
 
       - name: Set up Go
