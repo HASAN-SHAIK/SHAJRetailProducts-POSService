@@ -19,6 +19,7 @@
 - Central-authorized recovery is single-use, audited, ordering-aware, and cannot be replayed after consumption; POS/Frontend do not gain force-correction authority.
 - The merged cross-repository inventory acceptance covers SQLite persistence across restart, durable outbox reconnect, duplicate delivery, lost acknowledgement, and canonical PostgreSQL convergence.
 - POSService #141 explicitly certifies the V1 provisional-negative policy: without an authoritative Central inventory initialization marker, POS must not reject a tracked sale solely because local stock truth is absent/stale. The edge records the provisional negative balance, immutable sale movement, and durable inventory outbox fact for Central convergence.
+- POSService #144 certifies sale, full-refund, and partial-return batch convergence against merged Backend `main`, including restarted SQLite/outbox replay and original-batch restoration.
 
 ### Central
 
@@ -28,6 +29,7 @@
 - Purchase creation increments `products.stock_quantity` and batch quantities inside the same transaction. Backend #26 adds focused acceptance that receiving establishes stock-audit context before mutation, locks the canonical product, preserves supplier/batch branch scope, increments batch and canonical quantities transactionally, rolls back on failure, and carries actor/reason/source/reference into the database audit context.
 - Backend #27 adds the Central/admin-only manual-adjustment path with required reason/branch/non-zero delta, canonical product locking, audit context before mutation, negative-stock rejection, batch/product atomicity, rollback, and branch/batch ownership enforcement.
 - Backend #28 fixes stock-read branch isolation by resolving the caller's branch authority before query execution: restricted staff are pinned to their assigned branch, while privileged callers retain explicit-branch and all-branch reads. Focused acceptance executes these cases without requiring a live PostgreSQL connection.
+- Backend #32 adds the Central-authoritative POS batch-allocation ledger. Batch-enabled `sale_issue` movements allocate FIFO within the trusted registered-device branch, provisional oversell is recorded as an explicit unallocated deficit rather than a fabricated batch, and full/partial `sale_return` restores only the original outstanding allocation. Batch quantity mutations preserve POS milli precision.
 
 ## Acceptance matrix
 
@@ -50,7 +52,7 @@
 | Manual adjustment | Authorized Central operation records reason/actor and updates canonical stock atomically | CERTIFIED — Backend #27 provides the Central/admin-only audited adjustment path with atomic canonical/batch mutation, rollback, branch/batch scope, and negative-stock rejection |
 | Store/branch isolation | Inventory mutation/read cannot cross tenant or branch/store authority boundary | CERTIFIED — existing mutation paths enforce branch ownership and Backend #28 fixes/acceptance-certifies restricted stock reads while preserving privileged explicit/all-branch behavior |
 | Negative stock / oversell | V1 policy is explicit and consistently enforced online/offline; no accidental policy emerges from implementation | CERTIFIED — POSService #141 makes the existing architecture explicit: when POS has no authoritative initialized stock truth, tracked sales may create a provisional negative local balance online/offline, but the sale movement and durable outbox fact are mandatory so Central remains canonical and reconciliation can surface divergence; hard edge blocking is deferred until authoritative Central -> POS inventory initialization exists |
-| Batch inventory | Batch-enabled products reconcile product total and batch remaining quantity across receiving/sale/return | PARTIAL — receiving support is certified; end-to-end sale/return reconciliation acceptance required |
+| Batch inventory | Batch-enabled products reconcile product total and batch remaining quantity across receiving/sale/return | CERTIFIED — Backend #32 plus POSService #144 certify trusted-branch FIFO sale allocation, exactly-once product+batch convergence, original-batch full-refund restoration, partial-return restoration, and provisional unallocated deficit handling |
 | Cashier/operator visibility | Cashier can distinguish local available stock, pending Central convergence, blocked sync, and recovered/synced state where relevant | NEEDS ACCEPTANCE |
 | Reconciliation | Support/admin can compare POS movement IDs/balances with Central canonical facts and identify divergence | GAP |
 
@@ -62,8 +64,7 @@ No additional manager-approval semantics should be added unless inventory accept
 
 ## Ordered implementation priorities
 
-1. Certify batch reconciliation across receiving, sale, full refund, and partial return.
-2. Add cashier/operator and support reconciliation visibility, and close the remaining unified audit mapping.
-3. Run final Inventory V1 release certification and freeze the domain except for defects.
+1. Add cashier/operator and support reconciliation visibility, and close the remaining unified audit mapping.
+2. Run final Inventory V1 release certification and freeze the domain except for defects.
 
 Transaction Core V1 is frozen except for defects discovered by this matrix.
