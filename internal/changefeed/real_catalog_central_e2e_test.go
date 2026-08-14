@@ -46,14 +46,19 @@ func TestRealCentralCatalogConvergenceE2E(t *testing.T) {
 	const storeID = "11111111-1111-1111-1111-111111111111"
 	const oldBarcode = "8901234567890"
 	const newBarcode = "8901234567891"
+	const branchBBarcode = "8901234567202"
 	const oldCategoryID = "Fresh%20Produce%20%26%20Dairy"
 	byBarcode, err := repo.GetByBarcode(ctx, oldBarcode, storeID)
 	if err != nil { _ = db.Close(); t.Fatalf("initial offline barcode lookup: %v", err) }
 	if byBarcode.ID != "101" || byBarcode.Name != "Fresh Milk" || byBarcode.CategoryID == nil || *byBarcode.CategoryID != oldCategoryID { _ = db.Close(); t.Fatalf("unexpected initial product: %#v", byBarcode) }
 	if byBarcode.Price == nil || byBarcode.Price.AmountMinor != 6550 || byBarcode.Price.Currency != "INR" { _ = db.Close(); t.Fatalf("initial effective price mismatch: %#v", byBarcode.Price) }
+	if _, err = repo.GetByBarcode(ctx, branchBBarcode, storeID); err == nil { _ = db.Close(); t.Fatal("another branch product leaked into the registered device catalog") }
+	branchBMatches, err := repo.Search(ctx, "Branch B Secret", storeID, 20)
+	if err != nil { _ = db.Close(); t.Fatal(err) }
+	if len(branchBMatches) != 0 { _ = db.Close(); t.Fatalf("another branch product leaked into offline search: %#v", branchBMatches) }
 	categories, err := repo.ListCategories(ctx)
 	if err != nil { _ = db.Close(); t.Fatal(err) }
-	if len(categories) != 1 || categories[0].ID != oldCategoryID { _ = db.Close(); t.Fatalf("unexpected initial categories: %#v", categories) }
+	if len(categories) != 1 || categories[0].ID != oldCategoryID { _ = db.Close(); t.Fatalf("trusted-branch category snapshot leaked or omitted categories: %#v", categories) }
 
 	mutateCatalogState(t, centralURL, "barcode")
 	more, err = puller.pullOnce(ctx)
@@ -106,6 +111,7 @@ func TestRealCentralCatalogConvergenceE2E(t *testing.T) {
 	repo = catalog.NewRepository(db)
 	if _, err = repo.GetByBarcode(ctx, newBarcode, storeID); err == nil { t.Fatal("deactivated product barcode returned after SQLite restart") }
 	if _, err = repo.GetByBarcode(ctx, oldBarcode, storeID); err == nil { t.Fatal("stale primary barcode returned after SQLite restart") }
+	if _, err = repo.GetByBarcode(ctx, branchBBarcode, storeID); err == nil { t.Fatal("another branch product appeared after SQLite restart") }
 	matches, err = repo.Search(ctx, "fresh milk", storeID, 20)
 	if err != nil || len(matches) != 0 { t.Fatalf("deactivated product returned after restart: matches=%#v err=%v", matches, err) }
 	deactivated, err = repo.GetProduct(ctx, "101", storeID)
