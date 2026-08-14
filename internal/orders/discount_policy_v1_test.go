@@ -9,12 +9,6 @@ import (
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/testutil"
 )
 
-func seedDiscountProduct(t *testing.T, ctx context.Context, serviceDB interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}) {
-	t.Helper()
-}
-
 func TestV1LineDiscountRequiresCentralPermissionAndLimit(t *testing.T) {
 	db := testutil.OpenDatabase(t)
 	ctx := context.Background()
