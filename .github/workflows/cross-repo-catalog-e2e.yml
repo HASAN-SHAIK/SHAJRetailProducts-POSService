@@ -100,18 +100,9 @@ jobs:
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
           );
           INSERT INTO products(id,name,barcode,selling_price,category,stock_quantity,branch_id,is_deleted,created_at,updated_at)
-          VALUES(
-            101,
-            'Fresh Milk',
-            '8901234567890',
-            65.50,
-            'Fresh Produce & Dairy',
-            5.000,
-            '11111111-1111-1111-1111-111111111111',
-            FALSE,
-            '2026-08-14T06:30:00Z',
-            '2026-08-14T06:30:00Z'
-          );
+          VALUES
+          (101,'Fresh Milk','8901234567890',65.50,'Fresh Produce & Dairy',5.000,'11111111-1111-1111-1111-111111111111',FALSE,'2026-08-14T06:30:00Z','2026-08-14T06:30:00Z'),
+          (202,'Branch B Secret Product','8901234567202',99.00,'Branch B Only',7.000,'22222222-2222-2222-2222-222222222222',FALSE,'2026-08-14T06:30:00Z','2026-08-14T06:30:00Z');
 
           CREATE TABLE customers (
             id BIGINT PRIMARY KEY,
@@ -123,6 +114,16 @@ jobs:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
           );
+
+          CREATE TABLE branch_devices (
+            id UUID PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            branch_id UUID NOT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          INSERT INTO branch_devices(id,device_id,branch_id,is_active,created_at)
+          VALUES('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','device-e2e','11111111-1111-1111-1111-111111111111',TRUE,NOW());
           SQL
 
       - name: Install backend runtime dependencies
@@ -177,7 +178,7 @@ jobs:
           cat /tmp/pos-central-catalog-e2e.log
           exit 1
 
-      - name: Pull, mutate and deactivate Central catalog through SQLite
+      - name: Pull branch-scoped, mutate and deactivate Central catalog through SQLite
         run: CGO_ENABLED=1 go test ./internal/changefeed -run '^TestRealCentralCatalogConvergenceE2E$' -count=1 -v
 
       - name: Run focused primary barcode replacement acceptance
