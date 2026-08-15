@@ -27,7 +27,7 @@ Status: **IN PROGRESS**
 | Registration/device diagnostics | Central stores registration timestamps/reviewer state and branch device logs; POS #196 proves effective-config refresh failures remain support-visible | PARTIAL | expose/certify actionable registration, last-seen, revoked/inactive and config-sync support facts without mutation authority |
 | Tenant isolation | Backend #55 certifies that identical physical `device_id` values remain isolated in separate tenant database contexts and cannot collide through registration state | CERTIFIED | preserve tenant-scoped registration plus device-bound Catalog/Inventory/config regressions |
 | Interactive tenant browser-device guard | Backend #54 certifies ordinary tenant/browser traffic as validation-only: unregistered or inactive devices cannot be inserted/reactivated and first-run POS approval remains the sole registration authority | CERTIFIED | preserve validation-only browser guard acceptance |
-| Frontend admin operations | existing Frontend/admin device/branch screens require audit before V1 certification | GAP | certify list/pending approval/reject/revoke/reassign/error/loading behavior against Central authority; do not duplicate device state in browser storage |
+| Frontend admin operations | Frontend #40 certifies the existing admin screen with an exact-head focused test and production build: admin-only access, Central-before-local registration, physical POS identity display, licensing visibility, explicit cross-store reassignment blocking, Central deactivation, loading and actionable errors | CERTIFIED | preserve Frontend as a request/display surface only; Central and POS remain authority owners |
 | Recovery/re-registration | existing registration/deactivation/re-registration primitives should be reused rather than inventing a second recovery mechanism | GAP | establish lost/replaced-device recovery, token invalidation/replay behavior, and audit trail |
 
 ## Ordered V1 work
@@ -35,9 +35,8 @@ Status: **IN PROGRESS**
 1. Add real Central revoked-device configuration/sync reconnect acceptance while preserving the now-certified POS retained offline state.
 2. Certify terminal identity and replacement/re-registration semantics using existing registration primitives.
 3. Certify actionable registration/device support diagnostics.
-4. Complete Frontend Store/Device administrative UX acceptance using existing Central APIs.
-5. Close Branch/store canonical lifecycle evidence and run final Store/Device Operations V1 cross-repository acceptance.
-6. Freeze the domain except for real defects.
+4. Close Branch/store canonical lifecycle evidence and run final Store/Device Operations V1 cross-repository acceptance.
+5. Freeze the domain except for real defects.
 
 ## Release decision
 
