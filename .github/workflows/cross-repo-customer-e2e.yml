@@ -45,11 +45,11 @@ jobs:
       - name: Checkout POS Service
         uses: actions/checkout@v4
 
-      - name: Checkout dependent Backend customer mapping
+      - name: Checkout merged Backend main
         uses: actions/checkout@v4
         with:
           repository: HASAN-SHAIK/SHAJRetailProducts-Backend
-          ref: v1/customers-canonical-mapping
+          ref: main
           path: backend
 
       - uses: actions/setup-go@v5
