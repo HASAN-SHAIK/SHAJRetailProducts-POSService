@@ -107,6 +107,7 @@ jobs:
             customer_id BIGINT,
             total_price NUMERIC(14,2) NOT NULL DEFAULT 0,
             total_paid NUMERIC(14,2) NOT NULL DEFAULT 0,
+            returned_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
             order_status TEXT NOT NULL DEFAULT 'pending',
             transaction_type TEXT,
             billing_type TEXT,
