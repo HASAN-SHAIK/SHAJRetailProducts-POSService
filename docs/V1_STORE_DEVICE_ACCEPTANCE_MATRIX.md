@@ -14,32 +14,30 @@ Status: **IN PROGRESS**
 | Capability | Existing implementation / evidence | Status | V1 closure requirement |
 |---|---|---|---|
 | Branch/store canonical authority | Central branch records and branch-scoped runtime/configuration paths already exist and are used by Inventory, Catalog and effective configuration | PARTIAL | add focused Store/Device authority acceptance for create/read/update/lifecycle and tenant isolation |
-| First-run POS registration request | Central public `/api/v1/pos-registration/requests` creates a token-bound PENDING request without granting branch authority | NEEDS ACCEPTANCE | certify request token secrecy, duplicate-pending rejection and tenant isolation |
-| Admin approve/reject | Central approval requires branch + terminal and calls existing device licensing before setting APPROVED; rejection is PENDING-only | NEEDS ACCEPTANCE | certify admin authority, valid branch assignment, rejection and replay/idempotency |
-| POS registration claim | Token-bound claim changes only APPROVED -> CLAIMED | NEEDS ACCEPTANCE | certify wrong token/unapproved/replayed claim fail closed and returned identity matches approved device/branch/terminal |
-| Device licensing / plan limits | `ensureDeviceRegistration` enforces branch plan/override limits, supports active/reactivated devices and records device events | NEEDS ACCEPTANCE | certify limits, enterprise/unlimited semantics, inactive reactivation and no count bypass under concurrent/duplicate registration |
-| Trusted device -> branch binding | Central `resolveDevice(..., requireActive)` is already used by certified Inventory/Catalog/Pricing paths to derive trusted branch context | CERTIFIED | preserve existing cross-domain evidence; add Store/Device-specific lifecycle regression |
-| POS sync machine identity | Certified transaction/inventory/catalog/customer flows use tenant/device machine credentials rather than interactive tenant JWT | CERTIFIED | retain exact device/tenant binding and fail-closed revoked-device acceptance |
-| Device revocation / deactivation | `branch_devices.is_active` is consumed by trusted device resolution and licensing code | PARTIAL | identify/administer one canonical revoke path and prove revoked POS cannot sync/config-pull while local offline state remains readable |
-| Device reassignment between branches | Central device records are branch-scoped, but lifecycle semantics for moving an existing POS device are not yet certified | GAP | define explicit admin-only reassignment/re-registration behavior; prevent simultaneous active authority in two branches |
+| First-run POS registration request | Backend #51 certifies token-bound PENDING request behavior, duplicate pending handling and registration lifecycle | CERTIFIED | preserve focused Central acceptance |
+| Admin approve/reject | Backend #51 certifies licensing before approval plus PENDING-only rejection | CERTIFIED | preserve focused Central acceptance |
+| POS registration claim | Backend #51 certifies token-bound single-use APPROVED -> CLAIMED behavior | CERTIFIED | preserve focused Central acceptance |
+| Device licensing / plan limits | Backend #51 certifies existing branch plan/override licensing behavior before approval | CERTIFIED | preserve licensing acceptance while lifecycle evolves |
+| Trusted device -> branch binding | Central `resolveDevice(..., requireActive)` is used by certified Inventory/Catalog/Pricing paths; Backend #53 fails closed on ambiguous multiple-active legacy registrations | CERTIFIED | preserve cross-domain and reassignment regressions |
+| POS sync machine identity | Backend #52 requires every genuinely new POS sync event to come from an active Central-registered device while retaining exact duplicate/lost-ack detection | CERTIFIED | preserve device/tenant binding and replay invariant |
+| Device revocation / deactivation | active registration is required by trusted device resolution, POS sync, catalog feed and effective configuration | PARTIAL | certify revoked POS cannot sync/config-pull while retained local offline state remains readable and reconnect fails closed |
+| Device reassignment between branches | Backend #53 prevents one active device ID on two branches; reassignment requires old registration deactivation before new registration; ambiguous legacy registrations fail closed | CERTIFIED | preserve explicit Central-controlled reassignment semantics |
 | Terminal identity | Registration approval persists `terminal_id` with branch/device request | PARTIAL | establish uniqueness/scope policy and prove claimed POS retains the approved terminal identity |
 | Offline retained device/config state | POS already persists effective Central configuration and continues offline using cached accepted state | PARTIAL | certify restart/offline retention and behavior after Central revocation until connectivity resumes; POS must not locally override Central authority |
 | Registration/device diagnostics | Central stores registration timestamps/reviewer state and branch device logs; POS has generic sync/config diagnostics | PARTIAL | expose/certify actionable registration, last-seen, revoked/inactive and config-sync support facts without mutation authority |
 | Tenant isolation | tenant database context and device registration tables are tenant-scoped; certified device-bound Catalog/Inventory paths already prove branch isolation | PARTIAL | add explicit cross-tenant registration/device-ID collision acceptance |
-| Interactive tenant browser-device guard | `branchDeviceGuard` can call `ensureDeviceRegistration(..., mode='register')` on tenant JWT branch requests | GAP | prove this path is intentionally browser-only or change it so an unapproved POS installation cannot obtain POS registration authority through ordinary tenant API traffic |
+| Interactive tenant browser-device guard | Backend #54 certifies ordinary tenant/browser traffic as validation-only: unregistered or inactive devices cannot be inserted/reactivated and first-run POS approval remains the sole registration authority | CERTIFIED | preserve validation-only browser guard acceptance |
 | Frontend admin operations | existing Frontend/admin device/branch screens require audit before V1 certification | GAP | certify list/pending approval/reject/revoke/reassign/error/loading behavior against Central authority; do not duplicate device state in browser storage |
-| Recovery/re-registration | no new recovery mechanism should be invented if existing registration + Central admin lifecycle suffices | GAP | establish lost/replaced-device recovery, token invalidation/replay behavior, and audit trail |
+| Recovery/re-registration | existing registration/deactivation/re-registration primitives should be reused rather than inventing a second recovery mechanism | GAP | establish lost/replaced-device recovery, token invalidation/replay behavior, and audit trail |
 
 ## Ordered V1 work
 
-1. Certify the existing first-run request -> admin approve/reject -> token-bound claim path and licensing limits using focused Central acceptance.
-2. Resolve the browser-device-guard versus POS-registration authority boundary so POS approval cannot be bypassed.
-3. Certify revoke/deactivate and active-device -> branch binding across sync/config endpoints.
-4. Define and certify branch reassignment, terminal identity and replacement/re-registration semantics.
-5. Certify offline retained identity/config behavior and reconnect-after-revocation behavior in POS SQLite.
-6. Add explicit cross-tenant/device-ID collision acceptance and support diagnostics.
-7. Complete Frontend Store/Device administrative UX acceptance using existing Central APIs.
-8. Run final Store/Device Operations V1 cross-repository acceptance; freeze the domain except for real defects.
+1. Certify revoke/deactivate across sync/config plus retained offline identity/config and reconnect-after-revocation behavior.
+2. Certify terminal identity and replacement/re-registration semantics using existing registration primitives.
+3. Add explicit cross-tenant/device-ID collision acceptance and support diagnostics.
+4. Complete Frontend Store/Device administrative UX acceptance using existing Central APIs.
+5. Close Branch/store canonical lifecycle evidence and run final Store/Device Operations V1 cross-repository acceptance.
+6. Freeze the domain except for real defects.
 
 ## Release decision
 
