@@ -28,13 +28,13 @@ Status: **IN PROGRESS**
 | Tenant isolation | Backend #48 proves identical customer identifiers in separate tenant pools cannot cross-read or cross-write | CERTIFIED | satisfied by merged Backend #48 |
 | Branch/store applicability | Central canonical `customers` is deliberately tenant-global and has no branch/store identity; Backend #48 proves list/create/update/detail do not add branch/store filtering while remaining tenant-pool isolated | CERTIFIED | tenant-global across stores is the V1 policy; satisfied by merged Backend #48 |
 | Offline restart/replay | POS #182 proves outbound customer state/outbox survive restart and duplicate delivery converges idempotently; #184 proves inbound canonical reconciliation through the transactional inbox | CERTIFIED | satisfied by merged POS #182/#184 |
-| Diagnostics/support visibility | generic outbox/inbox diagnostics exist | PARTIAL | customer-specific failed/dead-letter identity visible to support |
-| Frontend customer UX | existing screens/APIs not yet audited against certified POS/Central authority | GAP | cashier create/search/select/error/offline/sync acceptance |
+| Diagnostics/support visibility | POS #189 proves poisoned outbound `customer.changed` and failed inbound `customer.upsert` remain support-visible with customer/message identity, attempt count, last error, payload and sync provenance | CERTIFIED | satisfied by merged POS #189 |
+| Frontend customer UX | existing screens/APIs are under authority-aligned audit; customer financial snapshots are already read-only in Frontend #38 | GAP | certify cashier create/search/select/error/offline/sync behavior against POS/Central authority |
 
 ## Ordered V1 work
 
 1. Establish and certify one canonical Central outstanding-balance/ledger mechanism spanning credit sales, customer payments, full returns, partial returns and POS synchronization.
-2. Audit and complete customer-specific support diagnostics and cashier/customer Frontend UX.
+2. Complete cashier/customer Frontend UX acceptance using the existing routed CustomerList/CustomerForm/billing flows rather than adding duplicate screens.
 3. Run final Customers V1 release acceptance; then freeze the domain except for real defects.
 
 ## Release decision
