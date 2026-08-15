@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'internal/customer/**'
+      - 'internal/inbox/**'
+      - 'internal/changefeed/real_customer_central_e2e_test.go'
       - 'internal/syncengine/real_customer_central_e2e_test.go'
       - 'docs/V1_CUSTOMERS_ACCEPTANCE_MATRIX.md'
       - '.github/workflows/cross-repo-customer-e2e.yml'
@@ -101,8 +103,33 @@ jobs:
             is_active BOOLEAN NOT NULL DEFAULT TRUE,
             location TEXT,
             address TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
           );
+          CREATE TABLE products (
+            id BIGINT PRIMARY KEY,
+            name TEXT NOT NULL,
+            barcode TEXT,
+            selling_price NUMERIC(14,2),
+            category TEXT,
+            stock_quantity NUMERIC(14,3) NOT NULL DEFAULT 0,
+            branch_id UUID,
+            hsn_code VARCHAR(20),
+            gst_percentage NUMERIC(5,2),
+            is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          CREATE TABLE branch_devices (
+            id UUID PRIMARY KEY,
+            device_id TEXT NOT NULL,
+            branch_id UUID NOT NULL,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          INSERT INTO branch_devices(id,device_id,branch_id,is_active,created_at)
+          VALUES('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','device-e2e','11111111-1111-1111-1111-111111111111',TRUE,NOW());
+
           CREATE TABLE orders (
             id BIGSERIAL PRIMARY KEY,
             client_order_id TEXT,
@@ -133,6 +160,13 @@ jobs:
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-08-canonical-pos-orders.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-08-pos-cashier-audit.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-15-pos-customer-canonical-mapping.sql
+
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO customers(id,name,mobile,phone,type,email,gst_number,credit_limit,current_balance,is_active,created_at,updated_at)
+          VALUES(42,'Central Reconciled Customer','8111111111','8111111111','retail','central-reconciled@example.test','GST-CENTRAL-RECONCILED',123.45,67.89,FALSE,NOW(),NOW());
+          INSERT INTO pos_customer_mappings(pos_customer_id,canonical_customer_id,source_event_id,source_version)
+          VALUES('cus-central-reconcile-e2e',42,'seed-central-reconcile',1);
+          SQL
 
       - name: Install backend runtime dependencies
         working-directory: backend
@@ -185,6 +219,9 @@ jobs:
           assert_one "SELECT COUNT(*) FROM pos_customers WHERE customer_id='${pos_customer_id}' AND credit_limit_minor=990000" "POS compatibility financial snapshot"
           assert_one "SELECT COUNT(*) FROM orders WHERE source_channel='pos' AND source_order_id='ord-customer-link-e2e' AND source_customer_id='${pos_customer_id}' AND customer_id=${canonical_id}" "canonical customer-linked sale"
           assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_id='evt_customer_${pos_customer_id}_v1' AND processed_at IS NOT NULL" "customer event replay"
+
+      - name: Reconcile Central customer lifecycle and financial snapshots back into POS
+        run: CGO_ENABLED=1 go test ./internal/changefeed -run '^TestRealCentralCustomerReconciliationE2E$' -count=1 -v
 
       - name: Show backend log on failure
         if: failure()

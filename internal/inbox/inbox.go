@@ -118,8 +118,49 @@ func upsertBarcode(ctx context.Context,tx *sql.Tx,raw []byte) error {
     return err
 }
 
-type customerPayload struct { ID string `json:"id"`; CustomerCode *string `json:"customer_code"`; Name string `json:"name"`; Phone *string `json:"phone"`; Email *string `json:"email"`; TaxID *string `json:"tax_id"`; CreditLimitMinor int64 `json:"credit_limit_minor"`; OutstandingMinor int64 `json:"outstanding_minor"`; Currency string `json:"currency"`; Status string `json:"status"`; SourceUpdatedAt *string `json:"source_updated_at"`; CreatedAt *string `json:"created_at"` }
-func upsertCustomer(ctx context.Context,tx *sql.Tx,raw []byte) error { var p customerPayload; if json.Unmarshal(raw,&p)!=nil || p.ID=="" || p.Name=="" { return errors.New("invalid_customer_payload") }; var state string; err:=tx.QueryRowContext(ctx,`SELECT sync_state FROM customers WHERE id=?`,p.ID).Scan(&state); if err==nil && state=="pending" { _,err=tx.ExecContext(ctx,`UPDATE customers SET sync_state='conflict' WHERE id=?`,p.ID); return err }; if err!=nil && !errors.Is(err,sql.ErrNoRows){return err}; if p.Currency==""{p.Currency="INR"}; if p.Status==""{p.Status="active"}; now:=time.Now().UTC().Format(time.RFC3339Nano); created:=now; if p.CreatedAt!=nil{created=*p.CreatedAt}; _,err=tx.ExecContext(ctx,`INSERT INTO customers(id,customer_code,name,phone,email,tax_id,credit_limit_minor,outstanding_minor,currency,status,source_updated_at,created_at,updated_at,local_version,sync_state) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,0,'synced') ON CONFLICT(id) DO UPDATE SET customer_code=excluded.customer_code,name=excluded.name,phone=excluded.phone,email=excluded.email,tax_id=excluded.tax_id,credit_limit_minor=excluded.credit_limit_minor,outstanding_minor=excluded.outstanding_minor,currency=excluded.currency,status=excluded.status,source_updated_at=excluded.source_updated_at,updated_at=excluded.updated_at,sync_state='synced'`,p.ID,p.CustomerCode,p.Name,p.Phone,p.Email,p.TaxID,p.CreditLimitMinor,p.OutstandingMinor,p.Currency,p.Status,p.SourceUpdatedAt,created,now); return err }
+type customerMappingPayload struct { ID string `json:"id"`; SourceVersion int64 `json:"source_version"` }
+type customerPayload struct { ID string `json:"id"`; CanonicalID *string `json:"canonical_id"`; POSMappings []customerMappingPayload `json:"pos_mappings"`; CustomerCode *string `json:"customer_code"`; Name string `json:"name"`; Phone *string `json:"phone"`; Email *string `json:"email"`; TaxID *string `json:"tax_id"`; CreditLimitMinor int64 `json:"credit_limit_minor"`; OutstandingMinor int64 `json:"outstanding_minor"`; Currency string `json:"currency"`; Status string `json:"status"`; SourceUpdatedAt *string `json:"source_updated_at"`; CreatedAt *string `json:"created_at"` }
+
+func resolveCustomerTarget(ctx context.Context, tx *sql.Tx, p customerPayload) (string, bool, error) {
+    targetID := ""
+    preservePending := false
+    for _, mapping := range p.POSMappings {
+        if mapping.ID == "" || mapping.SourceVersion < 0 { return "", false, errors.New("invalid_customer_mapping_payload") }
+        var localVersion int64
+        var state string
+        err := tx.QueryRowContext(ctx,`SELECT local_version,sync_state FROM customers WHERE id=?`,mapping.ID).Scan(&localVersion,&state)
+        if errors.Is(err,sql.ErrNoRows) { continue }
+        if err != nil { return "", false, err }
+        if targetID != "" && targetID != mapping.ID { return "", false, errors.New("ambiguous_customer_mapping") }
+        targetID = mapping.ID
+        if (state == "pending" || state == "conflict") && localVersion > mapping.SourceVersion { preservePending = true }
+    }
+    if targetID != "" { return targetID, preservePending, nil }
+    return p.ID, false, nil
+}
+
+func upsertCustomer(ctx context.Context,tx *sql.Tx,raw []byte) error {
+    var p customerPayload
+    if json.Unmarshal(raw,&p)!=nil || p.ID=="" || p.Name=="" { return errors.New("invalid_customer_payload") }
+    targetID,preservePending,err:=resolveCustomerTarget(ctx,tx,p)
+    if err!=nil { return err }
+    if preservePending { return nil }
+
+    var state string
+    err=tx.QueryRowContext(ctx,`SELECT sync_state FROM customers WHERE id=?`,targetID).Scan(&state)
+    if err==nil && state=="pending" && targetID==p.ID && len(p.POSMappings)==0 {
+        _,err=tx.ExecContext(ctx,`UPDATE customers SET sync_state='conflict' WHERE id=?`,targetID)
+        return err
+    }
+    if err!=nil && !errors.Is(err,sql.ErrNoRows){return err}
+    if p.Currency==""{p.Currency="INR"}
+    if p.Status==""{p.Status="active"}
+    now:=time.Now().UTC().Format(time.RFC3339Nano)
+    created:=now
+    if p.CreatedAt!=nil{created=*p.CreatedAt}
+    _,err=tx.ExecContext(ctx,`INSERT INTO customers(id,customer_code,name,phone,email,tax_id,credit_limit_minor,outstanding_minor,currency,status,source_updated_at,created_at,updated_at,local_version,sync_state) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,0,'synced') ON CONFLICT(id) DO UPDATE SET customer_code=excluded.customer_code,name=excluded.name,phone=excluded.phone,email=excluded.email,tax_id=excluded.tax_id,credit_limit_minor=excluded.credit_limit_minor,outstanding_minor=excluded.outstanding_minor,currency=excluded.currency,status=excluded.status,source_updated_at=excluded.source_updated_at,updated_at=excluded.updated_at,sync_state='synced'`,targetID,p.CustomerCode,p.Name,p.Phone,p.Email,p.TaxID,p.CreditLimitMinor,p.OutstandingMinor,p.Currency,p.Status,p.SourceUpdatedAt,created,now)
+    return err
+}
 
 func boolInt(v bool) int { if v { return 1 }; return 0 }
 func truncate(v string,n int) string { if len(v)<=n{return v}; return v[:n] }
