@@ -25,7 +25,7 @@ Status: **IN PROGRESS**
 | Terminal identity | Registration approval persists `terminal_id` with branch/device request | PARTIAL | establish uniqueness/scope policy and prove claimed POS retains the approved terminal identity |
 | Offline retained device/config state | POS #196 certifies last accepted tenant/branch/device effective configuration remains readable after a Central revoked-device 403 and survives SQLite restart; rejected refreshes cannot replace Central authority | CERTIFIED | preserve retained-state/reconnect acceptance while Central remains activation authority |
 | Registration/device diagnostics | Central stores registration timestamps/reviewer state and branch device logs; POS #196 proves effective-config refresh failures remain support-visible | PARTIAL | expose/certify actionable registration, last-seen, revoked/inactive and config-sync support facts without mutation authority |
-| Tenant isolation | tenant database context and device registration tables are tenant-scoped; certified device-bound Catalog/Inventory paths already prove branch isolation | PARTIAL | add explicit cross-tenant registration/device-ID collision acceptance |
+| Tenant isolation | Backend #55 certifies that identical physical `device_id` values remain isolated in separate tenant database contexts and cannot collide through registration state | CERTIFIED | preserve tenant-scoped registration plus device-bound Catalog/Inventory/config regressions |
 | Interactive tenant browser-device guard | Backend #54 certifies ordinary tenant/browser traffic as validation-only: unregistered or inactive devices cannot be inserted/reactivated and first-run POS approval remains the sole registration authority | CERTIFIED | preserve validation-only browser guard acceptance |
 | Frontend admin operations | existing Frontend/admin device/branch screens require audit before V1 certification | GAP | certify list/pending approval/reject/revoke/reassign/error/loading behavior against Central authority; do not duplicate device state in browser storage |
 | Recovery/re-registration | existing registration/deactivation/re-registration primitives should be reused rather than inventing a second recovery mechanism | GAP | establish lost/replaced-device recovery, token invalidation/replay behavior, and audit trail |
@@ -34,7 +34,7 @@ Status: **IN PROGRESS**
 
 1. Add real Central revoked-device configuration/sync reconnect acceptance while preserving the now-certified POS retained offline state.
 2. Certify terminal identity and replacement/re-registration semantics using existing registration primitives.
-3. Add explicit cross-tenant/device-ID collision acceptance and support diagnostics.
+3. Certify actionable registration/device support diagnostics.
 4. Complete Frontend Store/Device administrative UX acceptance using existing Central APIs.
 5. Close Branch/store canonical lifecycle evidence and run final Store/Device Operations V1 cross-repository acceptance.
 6. Freeze the domain except for real defects.
