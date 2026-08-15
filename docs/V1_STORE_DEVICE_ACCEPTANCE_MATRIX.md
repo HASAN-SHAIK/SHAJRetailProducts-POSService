@@ -22,7 +22,7 @@ Status: **IN PROGRESS**
 | POS sync machine identity | Backend #52 requires every genuinely new POS sync event to come from an active Central-registered device while retaining exact duplicate/lost-ack detection | CERTIFIED | preserve device/tenant binding and replay invariant |
 | Device revocation / deactivation | Backend #52/#54 require active Central registration for new sync/interactive authority; POS #196 certifies a revoked-device-style Central 403 fails closed without replacing the last accepted local configuration, records the failure diagnostically, and preserves the accepted snapshot across SQLite restart | CERTIFIED | add real Central route acceptance while preserving these revocation/replay invariants |
 | Device reassignment between branches | Backend #53 prevents one active device ID on two branches; reassignment requires old registration deactivation before new registration; ambiguous legacy registrations fail closed | CERTIFIED | preserve explicit Central-controlled reassignment semantics |
-| Terminal identity | Registration approval persists `terminal_id` with branch/device request | PARTIAL | establish uniqueness/scope policy and prove claimed POS retains the approved terminal identity |
+| Terminal identity | Backend registration approval assigns `terminal_id`; POS #200 certifies the approved store/terminal assignment becomes active locally and survives SQLite restart without changing the physical device/installation identity | CERTIFIED | preserve approved identity retention while recovery/replacement semantics are certified |
 | Offline retained device/config state | POS #196 certifies last accepted tenant/branch/device effective configuration remains readable after a Central revoked-device 403 and survives SQLite restart; rejected refreshes cannot replace Central authority | CERTIFIED | preserve retained-state/reconnect acceptance while Central remains activation authority |
 | Registration/device diagnostics | Central stores registration timestamps/reviewer state and branch device logs; POS #196 proves effective-config refresh failures remain support-visible | PARTIAL | expose/certify actionable registration, last-seen, revoked/inactive and config-sync support facts without mutation authority |
 | Tenant isolation | Backend #55 certifies that identical physical `device_id` values remain isolated in separate tenant database contexts and cannot collide through registration state | CERTIFIED | preserve tenant-scoped registration plus device-bound Catalog/Inventory/config regressions |
@@ -33,7 +33,7 @@ Status: **IN PROGRESS**
 ## Ordered V1 work
 
 1. Add real Central revoked-device configuration/sync reconnect acceptance while preserving the now-certified POS retained offline state.
-2. Certify terminal identity and replacement/re-registration semantics using existing registration primitives.
+2. Certify replacement/re-registration semantics using existing registration primitives while preserving the now-certified approved terminal identity retention.
 3. Certify actionable registration/device support diagnostics.
 4. Close Branch/store canonical lifecycle evidence and run final Store/Device Operations V1 cross-repository acceptance.
 5. Freeze the domain except for real defects.
