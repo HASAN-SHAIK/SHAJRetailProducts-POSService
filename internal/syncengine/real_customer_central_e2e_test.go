@@ -48,8 +48,6 @@ func TestRealCentralCustomerCanonicalConvergenceE2E(t *testing.T) {
 	customerEventID := "evt_customer_" + created.ID + "_v1"
 	assertRealCentralOutboxState(t, db, customerEventID, "pending")
 
-	// The customer and durable event already exist while offline. Restart before
-	// Central is reachable, then dispatch the exact persisted event.
 	if err := db.Close(); err != nil {
 		t.Fatalf("close POS database before restart: %v", err)
 	}
@@ -76,8 +74,6 @@ func TestRealCentralCustomerCanonicalConvergenceE2E(t *testing.T) {
 	}
 	assertRealCentralOutboxState(t, db, customerEventID, "published")
 
-	// Lost acknowledgement / replay of the immutable customer fact must not create
-	// another canonical customer or remap the POS identity.
 	if _, err := db.SQL().Exec(`UPDATE outbox_events
 		SET status='pending',published_at=NULL,locked_at=NULL,last_error=NULL,available_at=?
 		WHERE id=?`, time.Now().UTC().Format(time.RFC3339Nano), customerEventID); err != nil {
@@ -88,9 +84,8 @@ func TestRealCentralCustomerCanonicalConvergenceE2E(t *testing.T) {
 	}
 	assertRealCentralOutboxState(t, db, customerEventID, "published")
 
-	// Transaction Core already certifies sale creation. This dependent Customers
-	// acceptance publishes a valid immutable completed-sale snapshot that refers to
-	// the offline POS customer ID, proving Central links it through the mapping.
+	// Publish a partially-paid immutable sale so Central must derive the remaining
+	// customer debt from canonical order facts rather than trusting POS customer snapshots.
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	orderID := "ord-customer-link-e2e"
 	saleEventID := "evt-customer-link-sale-e2e"
@@ -128,7 +123,7 @@ func TestRealCentralCustomerCanonicalConvergenceE2E(t *testing.T) {
 			"client_payment_id": "client-pay-customer-link-e2e",
 			"mode": "cash",
 			"direction": "in",
-			"amount_minor": 10000,
+			"amount_minor": 6000,
 			"currency": "INR",
 			"status": "captured",
 			"created_at": now,
@@ -142,8 +137,8 @@ func TestRealCentralCustomerCanonicalConvergenceE2E(t *testing.T) {
 			"customer_id": created.ID,
 			"currency": "INR",
 			"total_minor": 10000,
-			"paid_minor": 10000,
-			"balance_minor": 0,
+			"paid_minor": 6000,
+			"balance_minor": 4000,
 			"snapshot": map[string]any{"order_id": orderID},
 			"snapshot_sha256": "customer-e2e-sha256",
 			"issued_at": now,
@@ -168,7 +163,6 @@ func TestRealCentralCustomerCanonicalConvergenceE2E(t *testing.T) {
 	}
 	assertRealCentralOutboxState(t, db, saleEventID, "published")
 
-	// Export the random POS-local identity for PostgreSQL assertions in the workflow.
 	if path := os.Getenv("POS_E2E_CUSTOMER_ID_FILE"); path != "" {
 		if err := os.WriteFile(path, []byte(created.ID), 0o600); err != nil {
 			t.Fatalf("write customer id file: %v", err)
