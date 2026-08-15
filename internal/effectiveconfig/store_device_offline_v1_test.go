@@ -65,7 +65,7 @@ func TestV1RevokedCentralConfigRefreshPreservesLastAcceptedOfflineSnapshot(t *te
 
     state, err := store.State(ctx)
     if err != nil { t.Fatal(err) }
-    if state.LastError == "" || !strings.Contains(state.LastError, "returned 403") {
+    if state.LastError == nil || !strings.Contains(*state.LastError, "returned 403") {
         t.Fatalf("expected revocation refresh failure to remain support-visible, got %+v", state)
     }
 
