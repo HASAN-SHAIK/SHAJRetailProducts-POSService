@@ -136,6 +136,7 @@ jobs:
             customer_id BIGINT REFERENCES customers(id),
             total_price NUMERIC(14,2) NOT NULL DEFAULT 0,
             total_paid NUMERIC(14,2) NOT NULL DEFAULT 0,
+            returned_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
             order_status TEXT NOT NULL DEFAULT 'pending',
             transaction_type TEXT,
             billing_type TEXT,
@@ -152,6 +153,14 @@ jobs:
             discount_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
             gst_percent NUMERIC(8,3) NOT NULL DEFAULT 0
           );
+          CREATE TABLE customer_payments (
+            id BIGSERIAL PRIMARY KEY,
+            customer_id BIGINT NOT NULL REFERENCES customers(id),
+            amount NUMERIC(14,2) NOT NULL,
+            payment_mode TEXT,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
           SQL
 
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-07-pos-sync-events.sql
@@ -160,6 +169,7 @@ jobs:
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-08-canonical-pos-orders.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-08-pos-cashier-audit.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-15-pos-customer-canonical-mapping.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-15-customer-outstanding-projection.sql
 
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 <<'SQL'
           INSERT INTO customers(id,name,mobile,phone,type,email,gst_number,credit_limit,current_balance,is_active,created_at,updated_at)
@@ -204,7 +214,7 @@ jobs:
       - name: Create offline customer, restart, replay and sync linked sale
         run: CGO_ENABLED=1 go test ./internal/syncengine -run '^TestRealCentralCustomerCanonicalConvergenceE2E$' -count=1 -v
 
-      - name: Verify canonical identity mapping, Central financial authority and sale association
+      - name: Verify canonical identity, financial authority, outstanding and sale association
         run: |
           pos_customer_id=$(cat "$POS_E2E_CUSTOMER_ID_FILE")
           canonical_id=$(psql -h 127.0.0.1 -U postgres -d tenant_e2e -At -v ON_ERROR_STOP=1 -c "SELECT canonical_customer_id FROM pos_customer_mappings WHERE pos_customer_id='${pos_customer_id}'")
@@ -215,10 +225,13 @@ jobs:
             if [ "$count" != "1" ]; then echo "$2 expected exactly 1 row, got $count"; exit 1; fi
           }
           assert_one "SELECT COUNT(*) FROM pos_customer_mappings WHERE pos_customer_id='${pos_customer_id}'" "immutable mapping"
-          assert_one "SELECT COUNT(*) FROM customers WHERE id=${canonical_id} AND name='Offline Customer E2E' AND regexp_replace(COALESCE(phone,mobile,''),'\\D','','g')='9000000000' AND credit_limit=0 AND current_balance=0" "canonical customer with Central-owned financials"
+          assert_one "SELECT COUNT(*) FROM customers WHERE id=${canonical_id} AND name='Offline Customer E2E' AND regexp_replace(COALESCE(phone,mobile,''),'\\D','','g')='9000000000' AND credit_limit=0 AND current_balance=40" "canonical customer with derived Central outstanding"
           assert_one "SELECT COUNT(*) FROM pos_customers WHERE customer_id='${pos_customer_id}' AND credit_limit_minor=990000" "POS compatibility financial snapshot"
-          assert_one "SELECT COUNT(*) FROM orders WHERE source_channel='pos' AND source_order_id='ord-customer-link-e2e' AND source_customer_id='${pos_customer_id}' AND customer_id=${canonical_id}" "canonical customer-linked sale"
+          assert_one "SELECT COUNT(*) FROM orders WHERE source_channel='pos' AND source_order_id='ord-customer-link-e2e' AND source_customer_id='${pos_customer_id}' AND customer_id=${canonical_id} AND total_price=100 AND total_paid=60" "canonical customer-linked partial-payment sale"
           assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_id='evt_customer_${pos_customer_id}_v1' AND processed_at IS NOT NULL" "customer event replay"
+
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -c "INSERT INTO customer_payments(customer_id,amount,payment_mode,notes) VALUES(${canonical_id},15,'cash','E2E credit collection')"
+          assert_one "SELECT COUNT(*) FROM customers WHERE id=${canonical_id} AND current_balance=25" "customer payment recomputes outstanding"
 
       - name: Reconcile Central customer lifecycle and financial snapshots back into POS
         run: CGO_ENABLED=1 go test ./internal/changefeed -run '^TestRealCentralCustomerReconciliationE2E$' -count=1 -v
