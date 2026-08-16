@@ -13,7 +13,7 @@ Status: **IN PROGRESS**
 
 | Capability | Existing implementation / evidence | Status | V1 closure requirement |
 |---|---|---|---|
-| Branch/store canonical authority | Central branch records and branch-scoped runtime/configuration paths already exist and are used by Inventory, Catalog and effective configuration | PARTIAL | add focused Store/Device authority acceptance for create/read/update/lifecycle and tenant isolation |
+| Branch/store canonical authority | Central branch records and branch-scoped runtime/configuration paths already exist and are used by Inventory, Catalog and effective configuration; Backend #56 protects canonical branch creation with Central admin authority | PARTIAL | add focused Store/Device authority acceptance for create/read/update/lifecycle and tenant isolation |
 | First-run POS registration request | Backend #51 certifies token-bound PENDING request behavior, duplicate pending handling and registration lifecycle | CERTIFIED | preserve focused Central acceptance |
 | Admin approve/reject | Backend #51 certifies licensing before approval plus PENDING-only rejection | CERTIFIED | preserve focused Central acceptance |
 | POS registration claim | Backend #51 certifies token-bound single-use APPROVED -> CLAIMED behavior | CERTIFIED | preserve focused Central acceptance |
@@ -24,19 +24,18 @@ Status: **IN PROGRESS**
 | Device reassignment between branches | Backend #53 prevents one active device ID on two branches; reassignment requires old registration deactivation before new registration; ambiguous legacy registrations fail closed | CERTIFIED | preserve explicit Central-controlled reassignment semantics |
 | Terminal identity | Backend registration approval assigns `terminal_id`; POS #200 certifies the approved store/terminal assignment becomes active locally and survives SQLite restart without changing the physical device/installation identity | CERTIFIED | preserve approved identity retention while recovery/replacement semantics are certified |
 | Offline retained device/config state | POS #196 certifies last accepted tenant/branch/device effective configuration remains readable after a Central revoked-device 403 and survives SQLite restart; rejected refreshes cannot replace Central authority | CERTIFIED | preserve retained-state/reconnect acceptance while Central remains activation authority |
-| Registration/device diagnostics | Central stores registration timestamps/reviewer state and branch device logs; POS #196 proves effective-config refresh failures remain support-visible | PARTIAL | expose/certify actionable registration, last-seen, revoked/inactive and config-sync support facts without mutation authority |
+| Registration/device diagnostics | Backend #58 certifies Central admin support views expose licensing limit/active count, physical device identity, last-seen, active/revoked state, registration lifecycle, branch/terminal assignment, reviewer/review time and claim time; POS #196 preserves configuration-refresh failures in local diagnostics | CERTIFIED | preserve read-only support diagnostics without mutation authority |
 | Tenant isolation | Backend #55 certifies that identical physical `device_id` values remain isolated in separate tenant database contexts and cannot collide through registration state | CERTIFIED | preserve tenant-scoped registration plus device-bound Catalog/Inventory/config regressions |
 | Interactive tenant browser-device guard | Backend #54 certifies ordinary tenant/browser traffic as validation-only: unregistered or inactive devices cannot be inserted/reactivated and first-run POS approval remains the sole registration authority | CERTIFIED | preserve validation-only browser guard acceptance |
 | Frontend admin operations | Frontend #40 certifies the existing admin screen with an exact-head focused test and production build: admin-only access, Central-before-local registration, physical POS identity display, licensing visibility, explicit cross-store reassignment blocking, Central deactivation, loading and actionable errors | CERTIFIED | preserve Frontend as a request/display surface only; Central and POS remain authority owners |
-| Recovery/re-registration | existing registration/deactivation/re-registration primitives should be reused rather than inventing a second recovery mechanism | GAP | establish lost/replaced-device recovery, token invalidation/replay behavior, and audit trail |
+| Recovery/re-registration | Backend #57 requires Central deactivation before a replacement physical POS can receive an already-used logical terminal; the replacement then follows the same Backend #51 request/approval/single-use claim lifecycle, preserving Central licensing and token replay protection | CERTIFIED | preserve Central-controlled replacement and single-use claim semantics |
 
 ## Ordered V1 work
 
 1. Add real Central revoked-device configuration/sync reconnect acceptance while preserving the now-certified POS retained offline state.
-2. Certify replacement/re-registration semantics using existing registration primitives while preserving the now-certified approved terminal identity retention.
-3. Certify actionable registration/device support diagnostics.
-4. Close Branch/store canonical lifecycle evidence and run final Store/Device Operations V1 cross-repository acceptance.
-5. Freeze the domain except for real defects.
+2. Close Branch/store canonical lifecycle evidence and tenant isolation.
+3. Run final Store/Device Operations V1 cross-repository acceptance.
+4. Freeze the domain except for real defects.
 
 ## Release decision
 
