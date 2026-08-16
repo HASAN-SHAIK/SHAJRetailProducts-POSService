@@ -6,6 +6,9 @@ on:
       - 'internal/localauth/**'
       - 'internal/security/**'
       - 'internal/server/auth_context.go'
+      - 'internal/server/auth_diagnostics.go'
+      - 'internal/server/auth_diagnostics_v1_test.go'
+      - 'internal/server/diagnostics.go'
       - 'internal/server/security.go'
       - 'internal/server/pos_permissions_test.go'
       - 'internal/server/order_void.go'
@@ -29,10 +32,10 @@ jobs:
         run: go test ./internal/localauth -count=1
       - name: Certify local machine API trust boundary
         run: go test ./internal/security -count=1
-      - name: Certify server-side POS permission boundary
+      - name: Certify server-side POS permission and auth diagnostics boundary
         run: >-
           go test ./internal/server
-          -run 'TestPOS(CashierCanRunOrdinarySale|DiscountRequiresDedicatedPermission|DiscountAllowedWithPermission)|TestLegacyOrdersWriteStillAllowsBasicSaleOnly|TestVoid(RequiresManagerApprovalForCashier|RejectsApprovalForDifferentSensitivePermission|DirectVoidPermissionStillRequiresReason)|Test(RefundRequiresManagerApprovalForCashier|PartialRefundRequiresManagerApprovalForCashier|RefundRejectsApprovalForDifferentSensitivePermission|DirectRefundPermissionStillRequiresReason|DirectPartialRefundPermissionStillRequiresReason)'
+          -run 'TestV1AuthDiagnostics|TestPOS(CashierCanRunOrdinarySale|DiscountRequiresDedicatedPermission|DiscountAllowedWithPermission)|TestLegacyOrdersWriteStillAllowsBasicSaleOnly|TestVoid(RequiresManagerApprovalForCashier|RejectsApprovalForDifferentSensitivePermission|DirectVoidPermissionStillRequiresReason)|Test(RefundRequiresManagerApprovalForCashier|PartialRefundRequiresManagerApprovalForCashier|RefundRejectsApprovalForDifferentSensitivePermission|DirectRefundPermissionStillRequiresReason|DirectPartialRefundPermissionStillRequiresReason)'
           -count=1
       - name: Build packaged POS runtime
         run: go build ./cmd/posservice
