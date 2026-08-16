@@ -1,0 +1,72 @@
+name: V1 Store Device release acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'docs/V1_STORE_DEVICE_ACCEPTANCE_MATRIX.md'
+      - '.github/workflows/v1-store-device-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pos-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+      - name: Test all POS packages
+        run: go test ./...
+      - name: Vet POS service
+        run: go vet ./...
+
+  central-authority:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Backend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-audit --no-fund
+      - name: Run merged Central Store Device authority acceptance
+        run: >-
+          npx jest
+          src/controllers/posRegistrationController.v1StoreDeviceAcceptance.test.js
+          src/controllers/storeDeviceDiagnostics.v1StoreDeviceAcceptance.test.js
+          src/services/branchService.v1StoreDeviceAcceptance.test.js
+          src/routes/branchRoutes.v1StoreDeviceAcceptance.test.js
+          src/utils/branchDeviceLicensing.v1StoreDeviceAcceptance.test.js
+          src/configuration/branchLifecycle.v1StoreDeviceAcceptance.test.js
+          src/middleware/branchDeviceGuard.v1StoreDeviceAcceptance.test.js
+          src/api/v1/modules/sync/posSync.routes.v1StoreDeviceAcceptance.test.js
+          src/api/v1/modules/sync/posConfig.routes.v1StoreDeviceAcceptance.test.js
+          --runInBand
+
+  frontend-admin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Frontend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run Store Device frontend authority acceptance
+        run: >-
+          CI=true npm test -- --watchAll=false
+          src/pages/BranchDevices.v1Acceptance.test.js
+      - name: Build production frontend
+        run: CI=false npm run build
