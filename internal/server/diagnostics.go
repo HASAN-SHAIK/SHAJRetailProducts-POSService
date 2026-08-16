@@ -16,6 +16,7 @@ type syncEventDiagnostics struct {
 	Outbox          []outboxEventDetails           `json:"outbox"`
 	Inbox           []inboxEventDetails            `json:"inbox"`
 	EffectiveConfig effectiveConfigSyncDiagnostics `json:"effective_config"`
+	LocalAuth       localAuthDiagnostics            `json:"local_auth"`
 }
 
 type effectiveConfigSyncDiagnostics struct {
@@ -85,6 +86,11 @@ func (s *Server) handleSyncEventDiagnostics(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "effective_config_diagnostics_unavailable")
 		return
 	}
+	localAuth, err := s.loadLocalAuthDiagnostics(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "local_auth_diagnostics_unavailable")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, syncEventDiagnostics{
 		CollectedAt:     time.Now().UTC(),
@@ -92,6 +98,7 @@ func (s *Server) handleSyncEventDiagnostics(w http.ResponseWriter, r *http.Reque
 		Outbox:          outboxItems,
 		Inbox:           inboxItems,
 		EffectiveConfig: effectiveConfig,
+		LocalAuth:       localAuth,
 	})
 }
 
