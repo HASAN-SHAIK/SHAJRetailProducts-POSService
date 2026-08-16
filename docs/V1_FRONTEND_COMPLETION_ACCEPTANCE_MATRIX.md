@@ -13,7 +13,7 @@ Status: **IN PROGRESS**
 | Capability | Existing evidence / required proof | Status |
 |---|---|---|
 | Application route/screen inventory | Frontend #48 certifies the current cashier/admin/mobile V1 route families, compatibility redirects, removed/deferred public entry points, authenticated fallback, and production build | CERTIFIED |
-| Online/offline authority selection | Frontend #43/#44 certify local POS as the only sync execution authority; Frontend #47 prevents orphan browser product mutations in local POS mode; remaining screen-level repository/fallback audit still required | PARTIAL |
+| Online/offline authority selection | Frontend #43/#44 certify local POS as the only sync execution authority; Frontend #47 prevents orphan browser product mutations in local POS mode; Frontend #50 keeps refund order/detail reads fail-closed on POS authority failures; remaining screen-level repository/fallback audit still required | PARTIAL |
 | Frontend authentication boundary | Frontend #41/#42 and Auth/Az release certification | CERTIFIED |
 | Cashier transaction flow | Transaction Core release certification, selected-order sync status, refund reconciliation | CERTIFIED |
 | Transaction pending/synced/blocked visibility | Frontend #37 and Transaction Core matrix | CERTIFIED |
@@ -24,21 +24,21 @@ Status: **IN PROGRESS**
 | Product/admin create/update/import UX | Frontend #47 fails closed on legacy browser product create/update/delete while local POS mode is authoritative; Central product/import UX validation, loading/error and canonical refresh acceptance still required | PARTIAL |
 | Inventory screen/operator truth | Inventory domain provides POS/Central read models and diagnostics; Frontend must avoid direct stock authority and expose actionable state | PARTIAL |
 | Pricing/discount/tax UX | Pricing/Tax release semantics certified outside Frontend; screen must display/use server/POS-calculated immutable facts and actionable rejection reasons | PARTIAL |
-| Returns/refunds UX | Existing refund reconciliation acceptance; complete loading/error/offline/approval-status coverage | PARTIAL |
+| Returns/refunds UX | Refund reconciliation plus Frontend #50 certify local-POS order/detail authority, deterministic loading/error states, actionable Retry and blocked submission while authoritative refund data is unavailable; existing approval/refund domain semantics remain certified | CERTIFIED |
 | Global 401/403 behavior | Cookie-only Central auth + POS local session certified; screen-level redirect/denial messaging acceptance required | PARTIAL |
 | Network/offline transition UX | Existing local POS pathways; certify reconnect without duplicate action or hidden loss | PARTIAL |
 | Sync failure/dead-letter visibility | Frontend #45 restricts the support/recovery console to admins; existing POSService outbox/inbox diagnostics expose pending/failed/dead-letter identity, attempts and errors while cashier transaction status stays on Orders | CERTIFIED |
-| Actionable error handling | Replace silent catches/generic failures on V1 paths with user-safe actionable errors while retaining diagnostic detail outside the UI | GAP |
-| Loading/empty/retry states | Audit and certify each V1 routed screen for deterministic loading, empty, retry and disabled-action behavior | GAP |
+| Actionable error handling | Frontend #49 certifies customer refresh failure/Retry while retaining local cached customers; Frontend #50 certifies actionable refund POS-authority errors/Retry; remaining V1 routed screens still require audit | PARTIAL |
+| Loading/empty/retry states | Frontend #49 certifies customer loading/empty/retry states and Frontend #50 certifies refund order/detail loading/retry/disabled-action behavior; remaining routed screens still require audit | PARTIAL |
 | Double-submit/idempotent interaction safety | Frontend #46 certifies checkout confirmation locks before asynchronous order work, local-POS checkout fails closed without legacy browser fallback, and the production build remains green; transaction APIs remain idempotent | CERTIFIED |
 | Browser persistence boundary | Frontend #43/#44 remove local-POS browser sync execution authority and Frontend #47 prevents product cache mutations from becoming local-POS authority; remaining IndexedDB/localStorage cache/UI-state audit still required | PARTIAL |
 | Accessibility/basic keyboard cashier flow | Focus/keyboard/disabled-state acceptance for critical login, billing, customer and refund paths | GAP |
-| Production Frontend build | Frontend #43/#44/#45/#46/#47/#48 exact heads built successfully; final merged-main domain gate still required | PARTIAL |
+| Production Frontend build | Frontend #43/#44/#45/#46/#47/#48/#49/#50 exact heads built successfully; final merged-main domain gate still required | PARTIAL |
 | Cross-repository Frontend release acceptance | Final merged Frontend -> POS SQLite -> Central/PostgreSQL happy/error/offline/reconnect paths | GAP |
 
 ## Ordered work
 
-1. Close silent/generic error, loading/empty/retry, offline transition, and duplicate-submit defects on critical cashier paths first: login/local auth, billing/order completion, customer selection, payment, refund/partial return and sync status.
+1. Close silent/generic error, loading/empty/retry, offline transition, and duplicate-submit defects on remaining critical cashier paths first: login/local auth, billing/order completion, customer selection, payment and sync status.
 2. Close product/catalog, inventory, pricing/tax and device/admin screen gaps without reintroducing browser-side business authority.
 3. Keep the now-certified admin-only Sync Center read surfaces presentation-only; do not add Frontend recovery authority.
 4. Audit browser persistence so IndexedDB/localStorage is cache/UI state only where Central/POS already owns authoritative facts.
