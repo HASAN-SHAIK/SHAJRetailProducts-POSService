@@ -13,8 +13,8 @@ Status: **IN PROGRESS**
 | Capability | Existing implementation / evidence | Status | V1 closure requirement |
 |---|---|---|---|
 | Tenant login + access JWT | Backend #61 aligns tenant authentication, admin provisioning, persisted PostgreSQL role constraints and fresh-tenant provisioning with the authoritative `admin`/`manager`/`cashier`/transitional-`staff` permission catalog; exact-head V1 Auth acceptance + control-plane CI passed | CERTIFIED | frozen except real defects; downstream protected-action permission enforcement remains tracked separately |
-| Refresh-token lifecycle | Central uses persisted refresh-token service, HttpOnly refresh cookie and refresh rotation/revocation paths | PARTIAL | make rotation replay-safe under concurrent use; certify expiry, logout/revocation and tenant isolation |
-| Platform-admin authentication | Separate admin cookie/token verifier requires `type=admin`, `admin_id` and `platform_admin` role | PARTIAL | certify key separation, expiry, route isolation and rejection of tenant tokens |
+| Refresh-token lifecycle | Backend #63 atomically locks and consumes the predecessor refresh token, revokes it and inserts exactly one successor in one PostgreSQL transaction; real PostgreSQL acceptance proves concurrent use yields one successor and replay/expired predecessors cannot rotate | CERTIFIED | logout/revocation and tenant-isolation evidence remains tracked under revocation/isolation rows |
+| Platform-admin authentication | Separate admin cookie/token verifier requires `type=admin`, `admin_id` and `platform_admin` role | PARTIAL | certify mandatory key separation, expiry, route isolation and rejection of tenant tokens |
 | Role -> permission authority | Backend #61 proves every supported V1 tenant role can be provisioned/authenticated from the same Central permission catalog | PARTIAL | audit protected Central/POS actions and certify permissions are enforced server-side rather than only exposed in claims/UI |
 | Branch/store authorization | Tenant token carries branch/all-branch/store permissions; certified Store/Device branch authority and guards already exist | PARTIAL | certify restricted users cannot cross branch/store scope while all-branch admins retain intended interactive access |
 | POS offline grant issuance | Backend #62 resolves the requested POS through active Central registration, rejects revoked/unregistered devices and restricted-user branch mismatch, and narrows the signed offline grant to the trusted device branch | CERTIFIED | frozen except real defects |
@@ -26,7 +26,7 @@ Status: **IN PROGRESS**
 | Online permission enforcement | Central has admin/tenant middleware plus route-level guards/permission helpers | PARTIAL | audit protected V1 routes and close any write path that relies only on Frontend visibility or broad staff access |
 | Authentication/device revocation interaction | Store/Device V1 certifies revoked devices lose new sync/config authority while retained offline config remains local; #62 blocks new offline grants to revoked devices | PARTIAL | define/certify disabled user/tenant/device and permission changes versus already-issued offline grants and local sessions |
 | Frontend authentication UX | Existing Frontend login/session/route guard flows are present | PARTIAL | certify login/logout/expiry, unauthorized/forbidden handling, permission-based action visibility and offline local-login UX without treating UI guards as authority |
-| Secrets/cookie/token hardening | JWT secrets, offline grant private/public key and HttpOnly cookies exist; secure cookie enabled in production | PARTIAL | certify required-secret fail-closed startup/config, SameSite/secure behavior, no token leakage, dependency/key review and production-secret documentation |
+| Secrets/cookie/token hardening | Tenant JWT secret, admin JWT secret setting, offline grant private/public key and HttpOnly cookies exist; secure cookie enabled in production | PARTIAL | remove admin-key fallback to tenant key, certify required-secret fail-closed startup/config, SameSite/secure behavior, no token leakage, dependency/key review and production-secret documentation |
 | Auth diagnostics/audit | Central/POS already have broader diagnostics/audit infrastructure | GAP | expose actionable read-only auth/session/grant/device failures without credentials/secrets and preserve security-relevant audit evidence |
 | Cross-tenant isolation | Tenant DB resolution is derived from verified tenant context and platform admin auth is separate | PARTIAL | executable cross-tenant token/session/grant tests proving no tenant/customer/store/device authority crosses tenant boundaries |
 
@@ -34,21 +34,21 @@ Status: **IN PROGRESS**
 
 1. **Supported-role mismatch — CLOSED:** Backend #61 now uses the authoritative Central permission catalog consistently in tenant auth and tenant-user provisioning and migrates PostgreSQL role constraints for manager/cashier support.
 2. **Offline-grant device authority — CLOSED:** Backend #62 requires an active registered Central POS device, derives the trusted branch from that registration, rejects branch mismatch for restricted users, and narrows all offline grants to one POS branch.
+3. **Refresh replay/concurrency — CLOSED:** Backend #63 consumes/rotates refresh tokens under one PostgreSQL row-lock transaction; real concurrent acceptance proves exactly one successor can be issued.
 
 ## Next proven gap
 
-**Refresh replay/concurrency:** Central currently finds a valid refresh token and later revokes/inserts its successor in separate operations. Concurrent refresh requests can therefore observe the same predecessor as valid before either revocation commits. V1 must make refresh consumption/rotation atomic and prove only one successor can be issued.
+**Platform-admin key separation:** Central's admin verifier enforces admin claims, but `ADMIN_JWT_SECRET` currently falls back to `JWT_SECRET`. V1 must fail closed when a dedicated admin signing secret is absent and prove tenant/admin tokens cannot cross verification boundaries.
 
 ## Ordered V1 work
 
-1. Make refresh rotation atomic/replay-safe; certify expiry, logout and tenant isolation.
-2. Certify platform-admin token isolation and key/route separation.
-3. Certify POS RS256 grant verification, device/store binding, PIN/session lockout/expiry and offline permission enforcement.
-4. Complete server-side Central permission + branch authorization audit.
-5. Close disabled user/tenant/device + already-issued offline grant/session semantics.
-6. Certify Frontend authentication/offline-login UX and actionable 401/403 handling.
-7. Complete secret/key/cookie/dependency review, auth diagnostics/audit and cross-tenant isolation.
-8. Run final Authentication / Authorization V1 cross-repository release acceptance, then freeze except for real defects.
+1. Enforce and certify platform-admin key/token/route isolation.
+2. Certify POS RS256 grant verification, device/store binding, PIN/session lockout/expiry and offline permission enforcement.
+3. Complete server-side Central permission + branch authorization audit.
+4. Close disabled user/tenant/device + already-issued offline grant/session semantics.
+5. Certify Frontend authentication/offline-login UX and actionable 401/403 handling.
+6. Complete secret/key/cookie/dependency review, auth diagnostics/audit and cross-tenant isolation.
+7. Run final Authentication / Authorization V1 cross-repository release acceptance, then freeze except for real defects.
 
 ## Release decision
 
