@@ -25,23 +25,23 @@ Status: **IN PROGRESS**
 | Inventory screen/operator truth | Inventory domain provides POS/Central read models and diagnostics; Frontend must avoid direct stock authority and expose actionable state | PARTIAL |
 | Pricing/discount/tax UX | Pricing/Tax release semantics certified outside Frontend; screen must display/use server/POS-calculated immutable facts and actionable rejection reasons | PARTIAL |
 | Returns/refunds UX | Refund reconciliation plus Frontend #50 certify local-POS order/detail authority, deterministic loading/error states, actionable Retry and blocked submission while authoritative refund data is unavailable; existing approval/refund domain semantics remain certified | CERTIFIED |
-| Global 401/403 behavior | Cookie-only Central auth + POS local session certified; screen-level redirect/denial messaging acceptance required | PARTIAL |
-| Network/offline transition UX | Existing local POS pathways; certify reconnect without duplicate action or hidden loss | PARTIAL |
+| Global 401/403 behavior | Cookie-only Central auth + POS local session certified; Frontend #53 adds actionable/accessibility-safe login state but screen-level protected-route denial messaging still requires acceptance | PARTIAL |
+| Network/offline transition UX | Existing local POS pathways; Frontend #53 certifies explicit offline-login fallback and single-flight offline continuation; reconnect without duplicate action or hidden loss still requires acceptance | PARTIAL |
 | Sync failure/dead-letter visibility | Frontend #45 restricts the support/recovery console to admins; existing POSService outbox/inbox diagnostics expose pending/failed/dead-letter identity, attempts and errors while cashier transaction status stays on Orders | CERTIFIED |
-| Actionable error handling | Frontend #49 certifies customer refresh failure/Retry; Frontend #50 certifies refund POS-authority errors/Retry; Frontend #52 certifies actionable local-POS product search/barcode outage handling and retry; remaining routed screens still require audit | PARTIAL |
-| Loading/empty/retry states | Frontend #49 certifies customer states, Frontend #50 refund states, and Frontend #51/#52 billing product-search progress/retry behavior; remaining routed screens still require audit | PARTIAL |
-| Double-submit/idempotent interaction safety | Frontend #46 certifies checkout confirmation locks before asynchronous order work, local-POS checkout fails closed without legacy browser fallback, and the production build remains green; transaction APIs remain idempotent | CERTIFIED |
+| Actionable error handling | Frontend #49 certifies customer refresh failure/Retry; Frontend #50 certifies refund POS-authority errors/Retry; Frontend #52 certifies actionable local-POS product search/barcode outage handling and retry; Frontend #53 certifies accessible online/offline authentication and registration errors; remaining routed screens still require audit | PARTIAL |
+| Loading/empty/retry states | Frontend #49 certifies customer states, Frontend #50 refund states, Frontend #51/#52 billing product-search progress/retry behavior, and Frontend #53 single-flight login/registration loading state; remaining routed screens still require audit | PARTIAL |
+| Double-submit/idempotent interaction safety | Frontend #46 certifies checkout confirmation locks before asynchronous order work; Frontend #53 additionally prevents duplicate online/offline authentication and POS registration activation while requests are in flight; transaction APIs remain idempotent | CERTIFIED |
 | Browser persistence boundary | Frontend #43/#44 remove local-POS browser sync execution authority and Frontend #47 prevents product cache mutations from becoming local-POS authority; remaining IndexedDB/localStorage cache/UI-state audit still required | PARTIAL |
-| Accessibility/basic keyboard cashier flow | Frontend #51 certifies native single-activation product suggestion buttons plus accessible search-progress semantics; login, customer and refund keyboard/focus acceptance still required | PARTIAL |
-| Production Frontend build | Frontend #43/#44/#45/#46/#47/#48/#49/#50/#51/#52 exact heads built successfully; final merged-main domain gate still required | PARTIAL |
+| Accessibility/basic keyboard cashier flow | Frontend #51 certifies native single-activation product suggestion buttons and search-progress semantics; Frontend #53 certifies associated login labels/autocomplete, accessible error/status live regions and native disabled-state interaction; customer/refund focus acceptance still required | PARTIAL |
+| Production Frontend build | Frontend #43/#44/#45/#46/#47/#48/#49/#50/#51/#52/#53 exact heads built successfully; final merged-main domain gate still required | PARTIAL |
 | Cross-repository Frontend release acceptance | Final merged Frontend -> POS SQLite -> Central/PostgreSQL happy/error/offline/reconnect paths | GAP |
 
 ## Ordered work
 
-1. Close silent/generic error, loading/empty/retry and offline transition defects on the remaining critical cashier paths: login/local auth, payment/order completion, inventory and pricing/tax rejection state.
+1. Close silent/generic error, loading/empty/retry and offline transition defects on the remaining critical cashier paths: payment/order completion, inventory and pricing/tax rejection state.
 2. Close product/admin import, inventory, pricing/tax and remaining device/admin screen gaps without reintroducing browser-side business authority.
 3. Keep the certified admin-only Sync Center read surfaces presentation-only; do not add Frontend recovery authority.
-4. Audit browser persistence so IndexedDB/localStorage is cache/UI state only where Central/POS already owns authoritative facts, and finish keyboard/accessibility acceptance for login/customer/refund paths.
+4. Audit browser persistence so IndexedDB/localStorage is cache/UI state only where Central/POS already owns authoritative facts, and finish keyboard/accessibility acceptance for customer/refund paths.
 5. Add focused Frontend acceptance and production-build gates, then a final cross-repository release gate against merged Backend/POS/Frontend `main`.
 
 ## Release criteria
