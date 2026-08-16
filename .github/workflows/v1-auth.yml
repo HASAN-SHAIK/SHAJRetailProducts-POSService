@@ -7,6 +7,10 @@ on:
       - 'internal/server/auth_context.go'
       - 'internal/server/security.go'
       - 'internal/server/pos_permissions_test.go'
+      - 'internal/server/order_void.go'
+      - 'internal/server/order_void_test.go'
+      - 'internal/server/order_refund.go'
+      - 'internal/server/order_refund_test.go'
       - '.github/workflows/v1-auth.yml'
       - 'docs/V1_AUTH_AUTHORIZATION_ACCEPTANCE_MATRIX.md'
   workflow_dispatch:
@@ -23,6 +27,9 @@ jobs:
       - name: Certify offline grants PIN sessions and device binding
         run: go test ./internal/localauth -count=1
       - name: Certify server-side POS permission boundary
-        run: go test ./internal/server -run 'TestPOS(CashierCanRunOrdinarySale|DiscountRequiresDedicatedPermission|DiscountAllowedWithPermission)|TestLegacyOrdersWriteStillAllowsBasicSaleOnly' -count=1
+        run: >-
+          go test ./internal/server
+          -run 'TestPOS(CashierCanRunOrdinarySale|DiscountRequiresDedicatedPermission|DiscountAllowedWithPermission)|TestLegacyOrdersWriteStillAllowsBasicSaleOnly|TestVoid(RequiresManagerApprovalForCashier|RejectsApprovalForDifferentSensitivePermission|DirectVoidPermissionStillRequiresReason)|Test(RefundRequiresManagerApprovalForCashier|PartialRefundRequiresManagerApprovalForCashier|RefundRejectsApprovalForDifferentSensitivePermission|DirectRefundPermissionStillRequiresReason|DirectPartialRefundPermissionStillRequiresReason)'
+          -count=1
       - name: Build packaged POS runtime
         run: go build ./cmd/posservice
