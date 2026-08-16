@@ -13,7 +13,7 @@ Status: **IN PROGRESS**
 | Capability | Existing evidence / required proof | Status |
 |---|---|---|
 | Application route/screen inventory | Audit current routed V1 screens and remove/defer dead or legacy-only entry points without mixing unrelated redesign | NEEDS ACCEPTANCE |
-| Online/offline authority selection | Frontend #43/#44 certify local POS as the only sync execution authority; remaining screen-level repository/fallback audit still required | PARTIAL |
+| Online/offline authority selection | Frontend #43/#44 certify local POS as the only sync execution authority; Frontend #47 prevents orphan browser product mutations in local POS mode; remaining screen-level repository/fallback audit still required | PARTIAL |
 | Frontend authentication boundary | Frontend #41/#42 and Auth/Az release certification | CERTIFIED |
 | Cashier transaction flow | Transaction Core release certification, selected-order sync status, refund reconciliation | CERTIFIED |
 | Transaction pending/synced/blocked visibility | Frontend #37 and Transaction Core matrix | CERTIFIED |
@@ -21,7 +21,7 @@ Status: **IN PROGRESS**
 | Customer financial snapshot read-only boundary | Frontend #38 + Customers release certification | CERTIFIED |
 | Store/device administration | Frontend #40 + Store/Device release certification | CERTIFIED |
 | Product/catalog cashier lookup | Products/Catalog release evidence; Frontend screen-level offline/error acceptance still required | PARTIAL |
-| Product/admin create/update/import UX | Existing Central product/import paths; screen validation, loading/error and canonical refresh acceptance required | PARTIAL |
+| Product/admin create/update/import UX | Frontend #47 fails closed on legacy browser product create/update/delete while local POS mode is authoritative; Central product/import UX validation, loading/error and canonical refresh acceptance still required | PARTIAL |
 | Inventory screen/operator truth | Inventory domain provides POS/Central read models and diagnostics; Frontend must avoid direct stock authority and expose actionable state | PARTIAL |
 | Pricing/discount/tax UX | Pricing/Tax release semantics certified outside Frontend; screen must display/use server/POS-calculated immutable facts and actionable rejection reasons | PARTIAL |
 | Returns/refunds UX | Existing refund reconciliation acceptance; complete loading/error/offline/approval-status coverage | PARTIAL |
@@ -30,10 +30,10 @@ Status: **IN PROGRESS**
 | Sync failure/dead-letter visibility | Frontend #45 restricts the support/recovery console to admins; existing POSService outbox/inbox diagnostics expose pending/failed/dead-letter identity, attempts and errors while cashier transaction status stays on Orders | CERTIFIED |
 | Actionable error handling | Replace silent catches/generic failures on V1 paths with user-safe actionable errors while retaining diagnostic detail outside the UI | GAP |
 | Loading/empty/retry states | Audit and certify each V1 routed screen for deterministic loading, empty, retry and disabled-action behavior | GAP |
-| Double-submit/idempotent interaction safety | Transaction APIs are idempotent; certify buttons/forms prevent accidental duplicate user actions and tolerate replay safely | PARTIAL |
-| Browser persistence boundary | Frontend #43/#44 remove local-POS browser sync execution authority; remaining IndexedDB/localStorage cache/UI-state audit still required | PARTIAL |
+| Double-submit/idempotent interaction safety | Frontend #46 certifies checkout confirmation locks before asynchronous order work, local-POS checkout fails closed without legacy browser fallback, and the production build remains green; transaction APIs remain idempotent | CERTIFIED |
+| Browser persistence boundary | Frontend #43/#44 remove local-POS browser sync execution authority and Frontend #47 prevents product cache mutations from becoming local-POS authority; remaining IndexedDB/localStorage cache/UI-state audit still required | PARTIAL |
 | Accessibility/basic keyboard cashier flow | Focus/keyboard/disabled-state acceptance for critical login, billing, customer and refund paths | GAP |
-| Production Frontend build | Frontend #43/#44/#45 exact heads built successfully; final merged-main domain gate still required | PARTIAL |
+| Production Frontend build | Frontend #43/#44/#45/#46/#47 exact heads built successfully; final merged-main domain gate still required | PARTIAL |
 | Cross-repository Frontend release acceptance | Final merged Frontend -> POS SQLite -> Central/PostgreSQL happy/error/offline/reconnect paths | GAP |
 
 ## Ordered work
