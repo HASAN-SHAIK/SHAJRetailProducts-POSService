@@ -117,6 +117,46 @@ func TestV1LockoutLogoutAndReenrollmentInvalidateSessions(t *testing.T) {
 	}
 }
 
+func TestV1AlreadyIssuedOfflineAuthorityIsBoundedByGrantAndSessionExpiry(t *testing.T) {
+	ctx, service, key, db := openV1AuthDB(t)
+	defer db.Close()
+
+	grantExpiresAt := time.Now().UTC().Add(7 * 24 * time.Hour).Truncate(time.Second)
+	grant := v1Grant(t, key, map[string]any{
+		"grant_id": "grant-bounded",
+		"exp": grantExpiresAt.Unix(),
+	})
+	if _, err := service.EnrollForDevice(ctx, grant, "2468", "device-1", "store-1"); err != nil { t.Fatal(err) }
+
+	loginStarted := time.Now().UTC()
+	token, _, err := service.Login(ctx, "44", "2468")
+	if err != nil { t.Fatal(err) }
+
+	var sessionExpiresRaw string
+	if err := db.SQL().QueryRowContext(ctx, `SELECT expires_at FROM local_auth_sessions WHERE user_id='44'`).Scan(&sessionExpiresRaw); err != nil { t.Fatal(err) }
+	sessionExpiresAt, err := time.Parse(time.RFC3339Nano, sessionExpiresRaw)
+	if err != nil { t.Fatal(err) }
+	if sessionExpiresAt.After(loginStarted.Add(defaultSessionTTL + time.Minute)) {
+		t.Fatalf("local session exceeded V1 session bound: %s", sessionExpiresAt)
+	}
+	if sessionExpiresAt.After(grantExpiresAt) {
+		t.Fatalf("local session outlived Central grant: session=%s grant=%s", sessionExpiresAt, grantExpiresAt)
+	}
+
+	// A truly offline POS cannot receive instantaneous Central revocation. V1
+	// therefore bounds already-issued authority by the signed grant expiry. Move
+	// the persisted clock boundary past that grant and prove both the active
+	// session and future PIN login fail closed.
+	past := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
+	if _, err := db.SQL().ExecContext(ctx, `UPDATE local_users SET grant_expires_at=? WHERE user_id='44'`, past); err != nil { t.Fatal(err) }
+	if _, err := service.Authenticate(ctx, token); err != ErrSessionInvalid {
+		t.Fatalf("session survived grant expiry: %v", err)
+	}
+	if _, _, err := service.Login(ctx, "44", "2468"); err != ErrInvalidGrant {
+		t.Fatalf("PIN login survived grant expiry: %v", err)
+	}
+}
+
 func TestV1GrantSignedByUnknownKeyStillFails(t *testing.T) {
 	ctx, service, _, db := openV1AuthDB(t)
 	defer db.Close()
