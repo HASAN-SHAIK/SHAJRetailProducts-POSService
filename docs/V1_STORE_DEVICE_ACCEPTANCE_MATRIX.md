@@ -13,7 +13,7 @@ Status: **IN PROGRESS**
 
 | Capability | Existing implementation / evidence | Status | V1 closure requirement |
 |---|---|---|---|
-| Branch/store canonical authority | Central branch records and branch-scoped runtime/configuration paths already exist and are used by Inventory, Catalog and effective configuration; Backend #56 protects canonical branch creation with Central admin authority | PARTIAL | add focused Store/Device authority acceptance for create/read/update/lifecycle and tenant isolation |
+| Branch/store canonical authority | Backend #56 protects canonical branch creation with Central admin authority; Backend #59 adds `is_active`, admin-only update/soft-deactivation, blocks deactivation while active POS devices remain, rejects POS authority on inactive branches, and makes trusted config/device resolution fail closed for inactive branches while preserving existing device route/response contracts | CERTIFIED | preserve branch lifecycle, tenant isolation, and cross-domain branch-scoped regressions |
 | First-run POS registration request | Backend #51 certifies token-bound PENDING request behavior, duplicate pending handling and registration lifecycle | CERTIFIED | preserve focused Central acceptance |
 | Admin approve/reject | Backend #51 certifies licensing before approval plus PENDING-only rejection | CERTIFIED | preserve focused Central acceptance |
 | POS registration claim | Backend #51 certifies token-bound single-use APPROVED -> CLAIMED behavior | CERTIFIED | preserve focused Central acceptance |
@@ -33,9 +33,8 @@ Status: **IN PROGRESS**
 ## Ordered V1 work
 
 1. Add real Central revoked-device configuration/sync reconnect acceptance while preserving the now-certified POS retained offline state.
-2. Close Branch/store canonical lifecycle evidence and tenant isolation.
-3. Run final Store/Device Operations V1 cross-repository acceptance.
-4. Freeze the domain except for real defects.
+2. Run final Store/Device Operations V1 cross-repository acceptance.
+3. Freeze the domain except for real defects.
 
 ## Release decision
 
