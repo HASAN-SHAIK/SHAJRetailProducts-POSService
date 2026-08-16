@@ -12,7 +12,7 @@ Status: **IN PROGRESS**
 
 | Capability | Existing evidence / required proof | Status |
 |---|---|---|
-| Application route/screen inventory | Audit current routed V1 screens and remove/defer dead or legacy-only entry points without mixing unrelated redesign | NEEDS ACCEPTANCE |
+| Application route/screen inventory | Frontend #48 certifies the current cashier/admin/mobile V1 route families, compatibility redirects, removed/deferred public entry points, authenticated fallback, and production build | CERTIFIED |
 | Online/offline authority selection | Frontend #43/#44 certify local POS as the only sync execution authority; Frontend #47 prevents orphan browser product mutations in local POS mode; remaining screen-level repository/fallback audit still required | PARTIAL |
 | Frontend authentication boundary | Frontend #41/#42 and Auth/Az release certification | CERTIFIED |
 | Cashier transaction flow | Transaction Core release certification, selected-order sync status, refund reconciliation | CERTIFIED |
@@ -33,17 +33,16 @@ Status: **IN PROGRESS**
 | Double-submit/idempotent interaction safety | Frontend #46 certifies checkout confirmation locks before asynchronous order work, local-POS checkout fails closed without legacy browser fallback, and the production build remains green; transaction APIs remain idempotent | CERTIFIED |
 | Browser persistence boundary | Frontend #43/#44 remove local-POS browser sync execution authority and Frontend #47 prevents product cache mutations from becoming local-POS authority; remaining IndexedDB/localStorage cache/UI-state audit still required | PARTIAL |
 | Accessibility/basic keyboard cashier flow | Focus/keyboard/disabled-state acceptance for critical login, billing, customer and refund paths | GAP |
-| Production Frontend build | Frontend #43/#44/#45/#46/#47 exact heads built successfully; final merged-main domain gate still required | PARTIAL |
+| Production Frontend build | Frontend #43/#44/#45/#46/#47/#48 exact heads built successfully; final merged-main domain gate still required | PARTIAL |
 | Cross-repository Frontend release acceptance | Final merged Frontend -> POS SQLite -> Central/PostgreSQL happy/error/offline/reconnect paths | GAP |
 
 ## Ordered work
 
-1. Inventory the current routed V1 screens and their repository/authority dependencies on current Frontend `main`.
-2. Close silent/generic error, loading/empty/retry, offline transition, and duplicate-submit defects on critical cashier paths first: login/local auth, billing/order completion, customer selection, payment, refund/partial return and sync status.
-3. Close product/catalog, inventory, pricing/tax and device/admin screen gaps without reintroducing browser-side business authority.
-4. Keep the now-certified admin-only Sync Center read surfaces presentation-only; do not add Frontend recovery authority.
-5. Audit browser persistence so IndexedDB/localStorage is cache/UI state only where Central/POS already owns authoritative facts.
-6. Add focused Frontend acceptance and production-build gates, then a final cross-repository release gate against merged Backend/POS/Frontend `main`.
+1. Close silent/generic error, loading/empty/retry, offline transition, and duplicate-submit defects on critical cashier paths first: login/local auth, billing/order completion, customer selection, payment, refund/partial return and sync status.
+2. Close product/catalog, inventory, pricing/tax and device/admin screen gaps without reintroducing browser-side business authority.
+3. Keep the now-certified admin-only Sync Center read surfaces presentation-only; do not add Frontend recovery authority.
+4. Audit browser persistence so IndexedDB/localStorage is cache/UI state only where Central/POS already owns authoritative facts.
+5. Add focused Frontend acceptance and production-build gates, then a final cross-repository release gate against merged Backend/POS/Frontend `main`.
 
 ## Release criteria
 
