@@ -1,0 +1,70 @@
+name: V1 Frontend release acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'docs/V1_FRONTEND_COMPLETION_ACCEPTANCE_MATRIX.md'
+      - '.github/workflows/v1-frontend-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pos-edge-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: Test all POS packages
+        run: go test ./...
+      - name: Vet POS service
+        run: go vet ./...
+      - name: Build packaged POS runtime
+        run: go build ./cmd/posservice
+
+  frontend-merged-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Frontend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run merged Frontend V1 completion acceptance
+        run: >-
+          CI=true npm test -- --watchAll=false
+          src/appRoutes.v1.test.js
+          src/productsAdminImportStates.v1.test.js
+          src/pages/setupScreenResilience.v1.test.js
+          src/utils/authResponseStates.v1.test.js
+          src/utils/appSyncOrchestrator.v1.test.js
+          src/utils/deltaSyncAuthority.v1.test.js
+          src/utils/legacyBrowserSyncAuthority.v1.test.js
+          src/utils/browserPersistenceBoundary.v1.test.js
+          src/pages/syncCenterAccess.v1.test.js
+          src/pages/billing/retailBillingCheckout.v1.test.js
+          src/pages/billing/retailBillingProductSearchAuthority.v1.test.js
+          src/components/Billing/productSearchInteraction.v1.test.js
+          src/components/Billing/cartItemAccessibility.v1.test.js
+          src/components/Billing/cameraBarcodeAccessibility.v1.test.js
+          src/components/Billing/gstFrontendAuthority.v1.test.js
+          src/components/Login/loginInteraction.v1.test.js
+          src/components/common/PopUp/popupAccessibility.v1.test.js
+          src/components/common/PopUp/pricingPolicyMessages.v1.test.js
+          src/Repositories/LocalPosProductRepository.batchAuthority.v1.test.js
+          src/Repositories/localPosInventoryAuthority.v1.test.js
+          src/pages/customers/customerListStates.v1.test.js
+          src/pages/returnsCorrections/salesReturnAuthority.v1.test.js
+          src/components/returnsCorrections/returnsHeaderSyncAuthority.v1.test.js
+          src/utils/offlineProductsAuthority.v1.test.js
+      - name: Build merged production Frontend
+        run: CI=false npm run build
