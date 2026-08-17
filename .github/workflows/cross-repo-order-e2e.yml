@@ -1,4 +1,5 @@
 name: Cross-repo Order E2E
+# Exact-head release rerun: no assertion or runtime behavior change.
 
 on:
   pull_request:
