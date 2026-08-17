@@ -22,13 +22,13 @@ func TestV1LineDiscountRequiresCentralPermissionAndLimit(t *testing.T) {
 		return DiscountPolicy{Allowed: false, MaxPercent: 20}, nil
 	})
 	_, err = service.Create(ctx, CreateInput{ClientOrderID: "discount-disabled", StoreID: "store-1", Items: []ItemInput{{ProductID: ExternalID("301"), QuantityMilli: 1000, DiscountMinor: 1000}}})
-	if !errors.Is(err, ErrInvalidOrder) { t.Fatalf("expected disabled Central discount policy to reject discount, got %v", err) }
+	if !errors.Is(err, ErrDiscountNotAllowed) { t.Fatalf("expected typed disabled discount rejection, got %v", err) }
 
 	service.SetDiscountPolicy(func(context.Context) (DiscountPolicy, error) {
 		return DiscountPolicy{Allowed: true, MaxPercent: 20}, nil
 	})
 	_, err = service.Create(ctx, CreateInput{ClientOrderID: "discount-over-limit", StoreID: "store-1", Items: []ItemInput{{ProductID: ExternalID("301"), QuantityMilli: 1000, DiscountMinor: 2001}}})
-	if !errors.Is(err, ErrInvalidOrder) { t.Fatalf("expected discount above 20 percent to be rejected, got %v", err) }
+	if !errors.Is(err, ErrDiscountLimitExceeded) { t.Fatalf("expected typed discount limit rejection, got %v", err) }
 
 	order, err := service.Create(ctx, CreateInput{ClientOrderID: "discount-at-limit", StoreID: "store-1", Items: []ItemInput{{ProductID: ExternalID("301"), QuantityMilli: 1000, DiscountMinor: 2000}}})
 	if err != nil { t.Fatalf("expected discount at Central limit to succeed: %v", err) }
@@ -49,5 +49,5 @@ func TestV1LineDiscountPolicyFailureFailsClosed(t *testing.T) {
 		return DiscountPolicy{}, errors.New("config unavailable")
 	})
 	_, err = service.Create(ctx, CreateInput{ClientOrderID: "discount-policy-error", StoreID: "store-1", Items: []ItemInput{{ProductID: ExternalID("302"), QuantityMilli: 1000, DiscountMinor: 1000}}})
-	if err == nil || errors.Is(err, ErrInvalidOrder) { t.Fatalf("expected explicit policy load failure, got %v", err) }
+	if !errors.Is(err, ErrPricingPolicyUnavailable) { t.Fatalf("expected typed policy load failure, got %v", err) }
 }
