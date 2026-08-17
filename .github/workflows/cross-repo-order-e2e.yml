@@ -6,6 +6,7 @@ on:
       - 'internal/syncengine/**'
       - 'internal/server/order_vertical_slice_test.go'
       - 'docs/V1-TRANSACTION-ACCEPTANCE-MATRIX.md'
+      - 'docs/V1_FRONTEND_COMPLETION_ACCEPTANCE_MATRIX.md'
       - '.github/workflows/cross-repo-order-e2e.yml'
   workflow_dispatch:
 
