@@ -14,9 +14,14 @@ import (
 )
 
 var (
-	ErrNotFound        = errors.New("order not found")
-	ErrInvalidOrder    = errors.New("invalid order")
-	ErrAlreadyComplete = errors.New("order already completed")
+	ErrNotFound                = errors.New("order not found")
+	ErrInvalidOrder            = errors.New("invalid order")
+	ErrAlreadyComplete         = errors.New("order already completed")
+	ErrPriceOverrideNotAllowed = errors.New("price override not allowed")
+	ErrDiscountNotAllowed      = errors.New("discount not allowed")
+	ErrDiscountLimitExceeded   = errors.New("discount limit exceeded")
+	ErrPricingPolicyUnavailable = errors.New("pricing policy unavailable")
+	ErrTaxPolicyUnavailable    = errors.New("tax policy unavailable")
 )
 
 type DiscountPolicy struct {
@@ -190,12 +195,12 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 				if s.priceOverridePolicy != nil {
 					policyAllowed, policyErr := s.priceOverridePolicy(ctx)
 					if policyErr != nil {
-						return Order{}, fmt.Errorf("load price override policy: %w", policyErr)
+						return Order{}, fmt.Errorf("%w: price override: %v", ErrPricingPolicyUnavailable, policyErr)
 					}
 					allowed = allowed && policyAllowed
 				}
 				if !allowed {
-					return Order{}, ErrInvalidOrder
+					return Order{}, ErrPriceOverrideNotAllowed
 				}
 			}
 			price = *in.UnitPriceMinor
@@ -209,19 +214,19 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 			if resolvedDiscountPolicy == nil {
 				policy, policyErr := s.discountPolicy(ctx)
 				if policyErr != nil {
-					return Order{}, fmt.Errorf("load discount policy: %w", policyErr)
+					return Order{}, fmt.Errorf("%w: discount: %v", ErrPricingPolicyUnavailable, policyErr)
 				}
 				if policy.MaxPercent < 0 || policy.MaxPercent > 100 {
-					return Order{}, fmt.Errorf("invalid discount policy max percent %.4f", policy.MaxPercent)
+					return Order{}, fmt.Errorf("%w: invalid discount max percent %.4f", ErrPricingPolicyUnavailable, policy.MaxPercent)
 				}
 				resolvedDiscountPolicy = &policy
 			}
 			if !resolvedDiscountPolicy.Allowed {
-				return Order{}, ErrInvalidOrder
+				return Order{}, ErrDiscountNotAllowed
 			}
 			maxDiscount := int64(float64(gross) * resolvedDiscountPolicy.MaxPercent / 100)
 			if in.DiscountMinor > maxDiscount {
-				return Order{}, ErrInvalidOrder
+				return Order{}, ErrDiscountLimitExceeded
 			}
 		}
 		taxable := gross - in.DiscountMinor
@@ -234,7 +239,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 			if resolvedTaxPolicy == nil {
 				policy, policyErr := s.taxPolicy(ctx)
 				if policyErr != nil {
-					return Order{}, fmt.Errorf("load tax policy: %w", policyErr)
+					return Order{}, fmt.Errorf("%w: %v", ErrTaxPolicyUnavailable, policyErr)
 				}
 				resolvedTaxPolicy = &policy
 			}

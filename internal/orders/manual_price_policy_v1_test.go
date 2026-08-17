@@ -41,8 +41,8 @@ func TestV1ManualPriceOverrideRequiresCentralPolicy(t *testing.T) {
 		Currency:      "INR",
 		Items: []ItemInput{{ProductID: ExternalID("201"), QuantityMilli: 1000, UnitPriceMinor: &override}},
 	})
-	if !errors.Is(err, ErrInvalidOrder) {
-		t.Fatalf("expected Central policy to reject manual price override, got %v", err)
+	if !errors.Is(err, ErrPriceOverrideNotAllowed) {
+		t.Fatalf("expected typed Central policy rejection, got %v", err)
 	}
 
 	service.SetPriceOverridePolicy(func(context.Context) (bool, error) { return true, nil })
@@ -72,7 +72,7 @@ func TestV1ManualPricePolicyFailureFailsClosed(t *testing.T) {
 	service.SetPriceOverridePolicy(func(context.Context) (bool, error) { return false, errors.New("config unavailable") })
 	override := int64(9000)
 	_, err = service.Create(ctx, CreateInput{ClientOrderID: "manual-price-policy-error", StoreID: "store-1", Items: []ItemInput{{ProductID: ExternalID("202"), QuantityMilli: 1000, UnitPriceMinor: &override}}})
-	if err == nil || errors.Is(err, ErrInvalidOrder) {
-		t.Fatalf("expected explicit policy load failure, got %v", err)
+	if !errors.Is(err, ErrPricingPolicyUnavailable) {
+		t.Fatalf("expected typed policy load failure, got %v", err)
 	}
 }
