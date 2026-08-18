@@ -1,0 +1,41 @@
+name: V1 Authentication Authorization acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'internal/localauth/**'
+      - 'internal/security/**'
+      - 'internal/server/auth_context.go'
+      - 'internal/server/auth_diagnostics.go'
+      - 'internal/server/auth_diagnostics_v1_test.go'
+      - 'internal/server/diagnostics.go'
+      - 'internal/server/security.go'
+      - 'internal/server/pos_permissions_test.go'
+      - 'internal/server/order_void.go'
+      - 'internal/server/order_void_test.go'
+      - 'internal/server/order_refund.go'
+      - 'internal/server/order_refund_test.go'
+      - '.github/workflows/v1-auth.yml'
+      - 'docs/V1_AUTH_AUTHORIZATION_ACCEPTANCE_MATRIX.md'
+  workflow_dispatch:
+
+jobs:
+  pos-auth-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: Certify offline grants PIN sessions and device binding
+        run: go test ./internal/localauth -count=1
+      - name: Certify local machine API trust boundary
+        run: go test ./internal/security -count=1
+      - name: Certify server-side POS permission and auth diagnostics boundary
+        run: >-
+          go test ./internal/server
+          -run 'TestV1AuthDiagnostics|TestPOS(CashierCanRunOrdinarySale|DiscountRequiresDedicatedPermission|DiscountAllowedWithPermission)|TestLegacyOrdersWriteStillAllowsBasicSaleOnly|TestVoid(RequiresManagerApprovalForCashier|RejectsApprovalForDifferentSensitivePermission|DirectVoidPermissionStillRequiresReason)|Test(RefundRequiresManagerApprovalForCashier|PartialRefundRequiresManagerApprovalForCashier|RefundRejectsApprovalForDifferentSensitivePermission|DirectRefundPermissionStillRequiresReason|DirectPartialRefundPermissionStillRequiresReason)'
+          -count=1
+      - name: Build packaged POS runtime
+        run: go build ./cmd/posservice

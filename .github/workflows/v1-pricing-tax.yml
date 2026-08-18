@@ -8,10 +8,16 @@ on:
       - 'internal/orders/orders.go'
       - 'internal/orders/manual_price_policy_v1_test.go'
       - 'internal/orders/discount_policy_v1_test.go'
+      - 'internal/catalog/catalog.go'
       - 'internal/catalog/pricing_precedence_v1_test.go'
+      - 'internal/inbox/inbox.go'
+      - 'internal/inbox/product_gst_projection_v1_test.go'
+      - 'internal/database/migrations/0017_product_gst_rate.sql'
       - 'internal/effectiveconfig/store.go'
       - 'internal/effectiveconfig/pricing_policy_v1_test.go'
       - 'internal/effectiveconfig/discount_policy_v1_test.go'
+      - 'internal/server/diagnostics.go'
+      - 'internal/server/pricing_tax_sync_diagnostics_v1_test.go'
       - 'docs/V1_PRICING_TAX_ACCEPTANCE_MATRIX.md'
       - '.github/workflows/v1-pricing-tax.yml'
   workflow_dispatch:
@@ -30,6 +36,6 @@ jobs:
           go-version: '1.23.x'
           cache: true
       - name: Run V1 pricing policy acceptance
-        run: go test ./internal/orders ./internal/catalog ./internal/effectiveconfig
+        run: go test ./internal/orders ./internal/catalog ./internal/inbox ./internal/effectiveconfig ./internal/server
       - name: Build packaged POS runtime
         run: go build ./cmd/posservice

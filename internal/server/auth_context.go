@@ -143,7 +143,7 @@ func (s *Server) handleLocalAuthEnroll(w http.ResponseWriter, r *http.Request) {
 	if err != nil || strings.TrimSpace(identity.DeviceID) == "" || identity.StoreID == nil || strings.TrimSpace(*identity.StoreID) == "" {
 		writeError(w, http.StatusConflict, "device_not_registered_to_store"); return
 	}
-	user, err := s.localAuth.EnrollForDevice(r.Context(), input.OfflineGrant, input.PIN, identity.DeviceID, *identity.StoreID)
+	user, err := s.localAuth.EnrollForDevice(r.Context(), input.OfflineGrant, input.PIN, identity.DeviceID, *identity.StoreID, s.cfg.CentralTenantID)
 	if errors.Is(err, localauth.ErrInvalidPIN) { writeError(w, http.StatusBadRequest, "invalid_pin"); return }
 	if errors.Is(err, localauth.ErrInvalidGrant) { writeError(w, http.StatusUnauthorized, "invalid_offline_grant"); return }
 	if err != nil { writeError(w, http.StatusInternalServerError, "local_auth_enroll_failed"); return }

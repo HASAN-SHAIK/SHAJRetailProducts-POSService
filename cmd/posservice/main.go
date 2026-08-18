@@ -54,6 +54,15 @@ func main() {
         if maxPercent < 0 || maxPercent > 100 { return orders.DiscountPolicy{}, fmt.Errorf("billing.max_discount_percent must be between 0 and 100") }
         return orders.DiscountPolicy{Allowed: allowed, MaxPercent: maxPercent}, nil
     })
+    orderService.SetTaxPolicy(func(ctx context.Context) (orders.TaxPolicy, error) {
+        enabled, err := effectiveConfigStore.Bool(ctx, "tax.gst_enabled", true)
+        if err != nil { return orders.TaxPolicy{}, err }
+        mode, err := effectiveConfigStore.String(ctx, "tax.gst_mode", "INCLUSIVE")
+        if err != nil { return orders.TaxPolicy{}, err }
+        roundingMode, err := effectiveConfigStore.String(ctx, "tax.rounding_mode", "HALF_UP")
+        if err != nil { return orders.TaxPolicy{}, err }
+        return orders.TaxPolicy{Enabled: enabled, Mode: mode, RoundingMode: roundingMode}, nil
+    })
     paymentService := payments.New(db); inventoryService := inventory.New(db); receiptService := receipts.New(db)
     app := server.NewSecure(cfg, db, deviceService, catalogRepository, customerRepository, orderService, paymentService, inventoryService, receiptService, localAuth)
 

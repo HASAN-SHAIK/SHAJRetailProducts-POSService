@@ -1,17 +1,14 @@
-name: Cross-repo Order E2E
+name: V1 Reporting POS Branch E2E
 
 on:
   pull_request:
     paths:
-      - 'internal/syncengine/**'
-      - 'internal/server/order_vertical_slice_test.go'
-      - 'docs/V1-TRANSACTION-ACCEPTANCE-MATRIX.md'
-      - 'docs/V1_FRONTEND_COMPLETION_ACCEPTANCE_MATRIX.md'
-      - '.github/workflows/cross-repo-order-e2e.yml'
+      - 'docs/V1_REPORTING_ADMIN_ACCEPTANCE_MATRIX.md'
+      - '.github/workflows/cross-repo-reporting-branch-e2e.yml'
   workflow_dispatch:
 
 jobs:
-  order-e2e:
+  reporting-pos-branch-e2e:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -110,6 +107,7 @@ jobs:
             id BIGSERIAL PRIMARY KEY,
             client_order_id TEXT,
             customer_id BIGINT,
+            branch_id UUID,
             total_price NUMERIC(14,2) NOT NULL DEFAULT 0,
             total_paid NUMERIC(14,2) NOT NULL DEFAULT 0,
             order_status TEXT NOT NULL DEFAULT 'pending',
@@ -153,57 +151,39 @@ jobs:
             console.error(error);
             res.status(500).json({ code: error.code || 'E2E_SERVER_ERROR', message: error.message });
           });
-          const server = app.listen(5001, '127.0.0.1', () => console.log('POS sync E2E server listening on 5001'));
+          const server = app.listen(5001, '127.0.0.1');
           const shutdown = () => server.close(() => process.exit(0));
           process.on('SIGTERM', shutdown);
           process.on('SIGINT', shutdown);
           NODE
 
-          node backend/e2e-pos-sync-server.js >/tmp/pos-central-e2e.log 2>&1 &
-          echo $! >/tmp/pos-central-e2e.pid
+          node backend/e2e-pos-sync-server.js >/tmp/pos-reporting-e2e.log 2>&1 &
+          echo $! >/tmp/pos-reporting-e2e.pid
 
           for i in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:5001/api/v1/sync/events || true)
             if [ "$code" = "401" ]; then exit 0; fi
             sleep 1
           done
-          cat /tmp/pos-central-e2e.log
+          cat /tmp/pos-reporting-e2e.log
           exit 1
 
-      - name: Dispatch SQLite outbox to real central API and replay
+      - name: Dispatch restarted SQLite outbox through production Central route
         run: CGO_ENABLED=1 go test ./internal/syncengine -run '^TestRealCentralOrderE2E$' -count=1 -v
 
-      - name: Verify exactly-once PostgreSQL projections and pricing snapshots
+      - name: Verify canonical report branch provenance
         run: |
-          assert_one() {
-            local sql="$1"
-            local label="$2"
-            local count
-            count=$(psql -h 127.0.0.1 -U postgres -d tenant_e2e -At -v ON_ERROR_STOP=1 -c "$sql")
-            if [ "$count" != "1" ]; then
-              echo "$label expected exactly 1 row, got $count"
-              exit 1
-            fi
-          }
-
-          assert_one "SELECT COUNT(*) FROM pos_sync_events WHERE event_id='evt-cross-repo-order-e2e' AND processed_at IS NOT NULL" "processed sync event"
-          assert_one "SELECT COUNT(*) FROM pos_sales WHERE order_id='ord-cross-repo-e2e' AND source_event_id='evt-cross-repo-order-e2e'" "sale"
-          assert_one "SELECT COUNT(*) FROM pos_sale_items WHERE order_id='ord-cross-repo-e2e' AND item_id='itm-cross-repo-e2e'" "sale item"
-          assert_one "SELECT COUNT(*) FROM pos_sale_payments WHERE order_id='ord-cross-repo-e2e' AND payment_id='pay-cross-repo-e2e'" "payment"
-          assert_one "SELECT COUNT(*) FROM pos_sale_receipts WHERE order_id='ord-cross-repo-e2e' AND receipt_id='rcpt-cross-repo-e2e'" "receipt"
-          assert_one "SELECT COUNT(*) FROM pos_inventory_movements WHERE order_id='ord-cross-repo-e2e' AND movement_id='mov-cross-repo-e2e'" "inventory movement"
-          assert_one "SELECT COUNT(*) FROM orders WHERE source_channel='pos' AND source_order_id='ord-cross-repo-e2e'" "canonical order"
-
-          assert_one "SELECT COUNT(*) FROM pos_sales WHERE order_id='ord-cross-repo-e2e' AND subtotal_minor=12500 AND discount_minor=500 AND tax_minor=2160 AND total_minor=14160" "POS sale pricing snapshot"
-          assert_one "SELECT COUNT(*) FROM pos_sale_items WHERE item_id='itm-cross-repo-e2e' AND unit_price_minor=12500 AND discount_minor=500 AND tax_minor=2160 AND line_total_minor=14160 AND tax_code='HSN0401'" "POS sale item pricing snapshot"
-          assert_one "SELECT COUNT(*) FROM orders WHERE source_channel='pos' AND source_order_id='ord-cross-repo-e2e' AND subtotal_minor=12500 AND discount_minor=500 AND tax_minor=2160 AND total_minor=14160 AND total_price=141.60" "canonical order pricing snapshot"
-          assert_one "SELECT COUNT(*) FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE o.source_channel='pos' AND o.source_order_id='ord-cross-repo-e2e' AND oi.unit_price_minor=12500 AND oi.source_discount_minor=500 AND oi.tax_minor=2160 AND oi.line_total_minor=14160 AND oi.tax_code='HSN0401'" "canonical order item pricing snapshot"
+          count=$(psql -h 127.0.0.1 -U postgres -d tenant_e2e -At -v ON_ERROR_STOP=1 -c "SELECT COUNT(*) FROM orders WHERE source_channel='pos' AND source_order_id='ord-cross-repo-e2e' AND branch_id='11111111-1111-1111-1111-111111111111'::uuid")
+          if [ "$count" != "1" ]; then
+            echo "canonical POS order expected trusted branch provenance; got $count matching rows"
+            exit 1
+          fi
 
       - name: Show backend log on failure
         if: failure()
-        run: cat /tmp/pos-central-e2e.log || true
+        run: cat /tmp/pos-reporting-e2e.log || true
 
       - name: Stop E2E backend
         if: always()
         run: |
-          if [ -f /tmp/pos-central-e2e.pid ]; then kill "$(cat /tmp/pos-central-e2e.pid)" || true; fi
+          if [ -f /tmp/pos-reporting-e2e.pid ]; then kill "$(cat /tmp/pos-reporting-e2e.pid)" || true; fi

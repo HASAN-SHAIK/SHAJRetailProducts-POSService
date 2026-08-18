@@ -14,10 +14,14 @@ import (
 )
 
 var (
-	ErrNotFound         = errors.New("order not found")
-	ErrInvalidOrder     = errors.New("invalid order")
-	ErrAlreadyComplete  = errors.New("order already completed")
-	ErrCustomerNotFound = errors.New("customer not found")
+	ErrNotFound                = errors.New("order not found")
+	ErrInvalidOrder            = errors.New("invalid order")
+	ErrAlreadyComplete         = errors.New("order already completed")
+	ErrPriceOverrideNotAllowed = errors.New("price override not allowed")
+	ErrDiscountNotAllowed      = errors.New("discount not allowed")
+	ErrDiscountLimitExceeded   = errors.New("discount limit exceeded")
+	ErrPricingPolicyUnavailable = errors.New("pricing policy unavailable")
+	ErrTaxPolicyUnavailable    = errors.New("tax policy unavailable")
 )
 
 type DiscountPolicy struct {
@@ -30,6 +34,7 @@ type Service struct {
 	catalog             *catalog.Repository
 	priceOverridePolicy func(context.Context) (bool, error)
 	discountPolicy      func(context.Context) (DiscountPolicy, error)
+	taxPolicy           func(context.Context) (TaxPolicy, error)
 }
 
 func New(db *database.DB, catalogRepository *catalog.Repository) *Service {
@@ -42,6 +47,10 @@ func (s *Service) SetPriceOverridePolicy(policy func(context.Context) (bool, err
 
 func (s *Service) SetDiscountPolicy(policy func(context.Context) (DiscountPolicy, error)) {
 	s.discountPolicy = policy
+}
+
+func (s *Service) SetTaxPolicy(policy func(context.Context) (TaxPolicy, error)) {
+	s.taxPolicy = policy
 }
 
 type CreateInput struct {
@@ -176,6 +185,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 	var built []Item
 	var subtotal, discount, tax, total int64
 	var resolvedDiscountPolicy *DiscountPolicy
+	var resolvedTaxPolicy *TaxPolicy
 
 	for i, in := range input.Items {
 		productID := in.ProductID.String()
@@ -197,12 +207,12 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 				if s.priceOverridePolicy != nil {
 					policyAllowed, policyErr := s.priceOverridePolicy(ctx)
 					if policyErr != nil {
-						return Order{}, fmt.Errorf("load price override policy: %w", policyErr)
+						return Order{}, fmt.Errorf("%w: price override: %v", ErrPricingPolicyUnavailable, policyErr)
 					}
 					allowed = allowed && policyAllowed
 				}
 				if !allowed {
-					return Order{}, ErrInvalidOrder
+					return Order{}, ErrPriceOverrideNotAllowed
 				}
 			}
 			price = *in.UnitPriceMinor
@@ -216,22 +226,40 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 			if resolvedDiscountPolicy == nil {
 				policy, policyErr := s.discountPolicy(ctx)
 				if policyErr != nil {
-					return Order{}, fmt.Errorf("load discount policy: %w", policyErr)
+					return Order{}, fmt.Errorf("%w: discount: %v", ErrPricingPolicyUnavailable, policyErr)
 				}
 				if policy.MaxPercent < 0 || policy.MaxPercent > 100 {
-					return Order{}, fmt.Errorf("invalid discount policy max percent %.4f", policy.MaxPercent)
+					return Order{}, fmt.Errorf("%w: invalid discount max percent %.4f", ErrPricingPolicyUnavailable, policy.MaxPercent)
 				}
 				resolvedDiscountPolicy = &policy
 			}
 			if !resolvedDiscountPolicy.Allowed {
-				return Order{}, ErrInvalidOrder
+				return Order{}, ErrDiscountNotAllowed
 			}
 			maxDiscount := int64(float64(gross) * resolvedDiscountPolicy.MaxPercent / 100)
 			if in.DiscountMinor > maxDiscount {
-				return Order{}, ErrInvalidOrder
+				return Order{}, ErrDiscountLimitExceeded
 			}
 		}
-		lineTotal := gross - in.DiscountMinor + in.TaxMinor
+		taxable := gross - in.DiscountMinor
+		if taxable < 0 {
+			return Order{}, ErrInvalidOrder
+		}
+		lineTax := in.TaxMinor
+		lineTotal := taxable + lineTax
+		if s.taxPolicy != nil {
+			if resolvedTaxPolicy == nil {
+				policy, policyErr := s.taxPolicy(ctx)
+				if policyErr != nil {
+					return Order{}, fmt.Errorf("%w: %v", ErrTaxPolicyUnavailable, policyErr)
+				}
+				resolvedTaxPolicy = &policy
+			}
+			lineTax, lineTotal, err = calculateTax(*resolvedTaxPolicy, taxable, product.GSTRateBps)
+			if err != nil {
+				return Order{}, err
+			}
+		}
 		if lineTotal < 0 {
 			return Order{}, ErrInvalidOrder
 		}
@@ -242,11 +270,11 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 		built = append(built, Item{
 			ID: newID("itm"), LineNo: i + 1, ProductID: product.ID, SKU: product.SKU, ProductName: product.Name,
 			Barcode: barcode, QuantityMilli: in.QuantityMilli, UnitPriceMinor: price, DiscountMinor: in.DiscountMinor,
-			TaxMinor: in.TaxMinor, LineTotalMinor: lineTotal, TaxCode: product.TaxCode,
+			TaxMinor: lineTax, LineTotalMinor: lineTotal, TaxCode: product.TaxCode,
 		})
 		subtotal += gross
 		discount += in.DiscountMinor
-		tax += in.TaxMinor
+		tax += lineTax
 		total += lineTotal
 	}
 

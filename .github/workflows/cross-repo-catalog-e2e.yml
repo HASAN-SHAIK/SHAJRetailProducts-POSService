@@ -100,6 +100,8 @@ jobs:
             category TEXT,
             stock_quantity NUMERIC(14,3) NOT NULL DEFAULT 0,
             branch_id UUID,
+            hsn_code VARCHAR(20),
+            gst_percentage NUMERIC(5,2),
             is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -114,10 +116,20 @@ jobs:
             name TEXT NOT NULL,
             phone TEXT,
             mobile TEXT,
+            email TEXT,
+            gst_number TEXT,
             credit_limit NUMERIC(14,2) NOT NULL DEFAULT 0,
             current_balance NUMERIC(14,2) NOT NULL DEFAULT 0,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          CREATE TABLE pos_customer_mappings (
+            pos_customer_id TEXT PRIMARY KEY,
+            canonical_customer_id BIGINT NOT NULL REFERENCES customers(id),
+            source_event_id TEXT NOT NULL,
+            source_version BIGINT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
           );
 
           CREATE TABLE branch_devices (
@@ -140,6 +152,8 @@ jobs:
             category TEXT,
             stock_quantity NUMERIC(14,3) NOT NULL DEFAULT 0,
             branch_id UUID,
+            hsn_code VARCHAR(20),
+            gst_percentage NUMERIC(5,2),
             is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -152,10 +166,20 @@ jobs:
             name TEXT NOT NULL,
             phone TEXT,
             mobile TEXT,
+            email TEXT,
+            gst_number TEXT,
             credit_limit NUMERIC(14,2) NOT NULL DEFAULT 0,
             current_balance NUMERIC(14,2) NOT NULL DEFAULT 0,
+            is_active BOOLEAN NOT NULL DEFAULT TRUE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          );
+          CREATE TABLE pos_customer_mappings (
+            pos_customer_id TEXT PRIMARY KEY,
+            canonical_customer_id BIGINT NOT NULL REFERENCES customers(id),
+            source_event_id TEXT NOT NULL,
+            source_version BIGINT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
           );
 
           CREATE TABLE branch_devices (

@@ -15,7 +15,10 @@ type deviceBindingClaims struct {
 // to this installation. A copied grant cannot be enrolled on another POS.
 // Store-scoped users must also match the store registered to this POS; users
 // with all-branch access remain device-bound but may enroll at any store.
-func (s *Service) EnrollForDevice(ctx context.Context, grant, pin, deviceID, storeID string) (User, error) {
+// When expectedTenantID is supplied by the packaged runtime, the Central grant
+// must also belong to that configured tenant so a grant from another tenant
+// cannot be enrolled even when a physical device identifier is reused there.
+func (s *Service) EnrollForDevice(ctx context.Context, grant, pin, deviceID, storeID string, expectedTenantID ...string) (User, error) {
 	claims, err := s.verifyGrant(grant)
 	if err != nil {
 		return User{}, err
@@ -37,6 +40,12 @@ func (s *Service) EnrollForDevice(ctx context.Context, grant, pin, deviceID, sto
 	expectedDevice := strings.TrimSpace(deviceID)
 	if expectedDevice == "" || strings.TrimSpace(binding.DeviceID) != expectedDevice {
 		return User{}, ErrInvalidGrant
+	}
+	if len(expectedTenantID) > 0 {
+		expectedTenant := strings.TrimSpace(expectedTenantID[0])
+		if expectedTenant == "" || strings.TrimSpace(claims.TenantID) != expectedTenant {
+			return User{}, ErrInvalidGrant
+		}
 	}
 	expectedStore := strings.TrimSpace(storeID)
 	if expectedStore != "" && !claims.AllBranchAccess && strings.TrimSpace(claims.BranchID) != expectedStore {
