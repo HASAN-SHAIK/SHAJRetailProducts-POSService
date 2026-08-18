@@ -22,6 +22,7 @@ var (
 	ErrDiscountLimitExceeded   = errors.New("discount limit exceeded")
 	ErrPricingPolicyUnavailable = errors.New("pricing policy unavailable")
 	ErrTaxPolicyUnavailable    = errors.New("tax policy unavailable")
+	ErrCustomerNotFound = errors.New("customer not found")
 )
 
 type DiscountPolicy struct {
