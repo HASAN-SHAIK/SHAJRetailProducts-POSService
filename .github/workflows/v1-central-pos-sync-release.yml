@@ -1,0 +1,80 @@
+name: V1 Central POS synchronization release acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'docs/V1_CENTRAL_POS_SYNC_ACCEPTANCE_MATRIX.md'
+      - '.github/workflows/v1-central-pos-sync-release.yml'
+      - 'internal/changefeed/**'
+      - 'internal/inbox/**'
+      - 'internal/effectiveconfig/**'
+      - 'cmd/posservice/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pos-sync-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: Test all POS packages
+        run: go test ./...
+      - name: Vet POS service
+        run: go vet ./...
+      - name: Build packaged POS runtime
+        run: go build ./cmd/posservice
+
+  backend-merged-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Backend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Backend dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run merged Central configuration and catalog authority acceptance
+        run: >-
+          npx jest
+          tests/configuration.validation.test.js
+          tests/configuration.pricingIsolation.test.js
+          src/services/posSyncGateway.v1CatalogAcceptance.test.js
+          src/services/posSyncGateway.v1PricingTaxAcceptance.test.js
+          src/api/v1/modules/sync/posCatalogDeviceContext.test.js
+          --runInBand
+
+  frontend-sync-authority:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Frontend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run merged Frontend synchronization authority acceptance
+        run: >-
+          CI=true npm test -- --watchAll=false
+          src/utils/appSyncOrchestrator.v1.test.js
+          src/utils/deltaSyncAuthority.v1.test.js
+          src/utils/legacyBrowserSyncAuthority.v1.test.js
+          src/pages/syncCenterAccess.v1.test.js
+          src/components/returnsCorrections/returnsHeaderSyncAuthority.v1.test.js
+      - name: Build merged production Frontend
+        run: CI=false npm run build
