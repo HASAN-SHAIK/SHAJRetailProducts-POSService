@@ -23,7 +23,7 @@ Status: **IN PROGRESS**
 | Tax/GST reporting | Frontend exposes GST/tax report surfaces and Pricing/Tax V1 already owns immutable tax snapshots | PARTIAL | prove tax reports consume immutable canonical sale/return snapshots and do not recalculate with current policy |
 | Customer/outstanding admin reporting | Customers V1 now owns canonical outstanding/payment/return projection | PARTIAL | certify reporting reads canonical customer balance/ledger facts without POS/browser financial authority |
 | Store/branch reporting scope | Backend #77 binds every new canonical POS sale to the trusted active device branch; POS #244 proves restarted SQLite outbox → Central/PostgreSQL branch provenance and replay; Backend #80 applies `resolveBranchIdFromRequest`-based trusted scope to sales, daily, profit, profit-graph and product-performance queries and proves branch-A/branch-B isolation in PostgreSQL | PARTIAL | move branch inventory reporting to certified branch inventory truth; historical null POS branch provenance must remain explicit rather than guessed |
-| Tenant isolation | report controllers use `req.tenantPool` when present | PARTIAL | explicit two-tenant PostgreSQL acceptance proving identical IDs/data cannot cross-report |
+| Tenant isolation | Backend #81 proves identical report requests remain bound to separate supplied tenant PostgreSQL pools and never fall back to the default/global pool | CERTIFIED | preserve tenant-pool-only reporting authority across every reporting/admin query |
 | Date/range validation | some report paths validate dates and apply UTC ranges | PARTIAL | establish one V1 date-range contract, invalid-range behavior and bounded query limits |
 | Large-result safety | several detail lists are bounded, but Reporting V1 has no unified pagination/range matrix yet | GAP | certify bounded result sizes / date windows and avoid unbounded administrative queries |
 | Support/data-quality reporting | Backend contains data-quality/support reporting surfaces | PARTIAL | inventory existing routes, certify permissions, tenant scope, actionable diagnostics and credential-safe output |
@@ -38,6 +38,7 @@ Status: **IN PROGRESS**
 - POSService #244: real restarted POS SQLite durable outbox → production Central sync route on merged Backend `main` → PostgreSQL proves canonical POS order branch provenance and duplicate/replay safety.
 - Backend #78: existing canonical sales/profit/product aggregates are explicitly certified refund-aware using `orders.returned_amount` and returned item quantities.
 - Backend #80: sales, daily, profit, profit graph and product-performance reports use trusted Central branch scope; branch users cannot widen scope with caller input; branch inventory remains fail-closed; a real PostgreSQL branch-A/branch-B gate proves isolation plus partial-return net revenue.
+- Backend #81: report controllers remain bound to the supplied tenant PostgreSQL pool for identical requests and never fall back to the default/global database authority.
 - Historical canonical POS orders whose branch provenance was never recorded are not guessed or backfilled from current device registration because device reassignment can make that inference unsafe; they remain a reporting data-quality/reconciliation concern until exact provenance is available.
 
 ## First ordered work
@@ -45,7 +46,7 @@ Status: **IN PROGRESS**
 1. Move branch-scoped inventory reporting from the legacy tenant product-stock projection to certified branch inventory truth, then add branch-A/branch-B inventory acceptance.
 2. Make daily revenue consume canonical immutable order total/returned amount instead of reconstructing current line pricing, and certify date/timezone boundaries.
 3. Extend refund-aware sales/revenue/profit PostgreSQL acceptance through full returns and replay-safe canonical facts.
-4. Add explicit two-tenant reporting isolation and one bounded V1 date/range contract.
+4. Establish one bounded V1 date/range contract and certify invalid-range behavior.
 5. Audit the actual Frontend Dashboard/report/admin routes and close loading/error/empty/retry and browser-authority gaps.
 6. Add the final Reporting/Admin cross-repository release gate and mark every row CERTIFIED or explicitly justified N/A.
 
