@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -105,8 +106,27 @@ func TestV1MigrationTransactionFailureRollsBackSchemaAndData(t *testing.T) {
 	defer db.Close()
 
 	syntheticFailure := errors.New("synthetic migration failure")
-	err = db.WithTx(ctx, func(tx interface{ ExecContext(context.Context, string, ...any) (interface{}, error) }) error {
+	err = db.WithTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `CREATE TABLE migration_failure_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL)`); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO migration_failure_probe(id, value) VALUES(1, 'must-roll-back')`); err != nil {
+			return err
+		}
 		return syntheticFailure
 	})
-	_ = err
+	if !errors.Is(err, syntheticFailure) {
+		t.Fatalf("transaction failure = %v, want %v", err, syntheticFailure)
+	}
+
+	var tableCount int
+	if err := db.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'migration_failure_probe'`).Scan(&tableCount); err != nil {
+		t.Fatalf("check rollback probe table: %v", err)
+	}
+	if tableCount != 0 {
+		t.Fatalf("failed migration left schema behind: table count = %d", tableCount)
+	}
+	if err := db.IntegrityCheck(ctx); err != nil {
+		t.Fatalf("database not usable after failed migration transaction: %v", err)
+	}
 }
