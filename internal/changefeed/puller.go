@@ -17,6 +17,8 @@ import (
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/inbox"
 )
 
+const supportedChangeSchemaVersion = 1
+
 type Puller struct {
     db *database.DB
     inbox *inbox.Service
@@ -67,7 +69,12 @@ func (p *Puller) pullOnce(ctx context.Context) (bool,error) {
     if resp.StatusCode<200 || resp.StatusCode>=300 { return false,fmt.Errorf("change_feed_http_%d",resp.StatusCode) }
     var envelope response
     if err:=json.Unmarshal(body,&envelope); err!=nil{return false,fmt.Errorf("decode change feed: %w",err)}
-    for _,change:=range envelope.Changes { if err:=p.inbox.Apply(ctx,change); err!=nil{return false,fmt.Errorf("apply %s: %w",change.ID,err)} }
+    for _,change:=range envelope.Changes {
+        if change.SchemaVersion > supportedChangeSchemaVersion {
+            return false,fmt.Errorf("unsupported_change_schema:%s:v%d",change.Type,change.SchemaVersion)
+        }
+        if err:=p.inbox.Apply(ctx,change); err!=nil{return false,fmt.Errorf("apply %s: %w",change.ID,err)}
+    }
     if envelope.Cursor!="" && envelope.Cursor!=cursor { if err:=p.saveCursor(ctx,envelope.Cursor); err!=nil{return false,err} }
     return envelope.HasMore,nil
 }
