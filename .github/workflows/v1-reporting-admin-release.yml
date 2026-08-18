@@ -76,6 +76,7 @@ jobs:
       - name: Run merged Frontend reporting acceptance
         run: >-
           CI=true npm test -- --watchAll=false
+          src/pages/dashboardNetworkState.v1.test.js
           src/mobile/pages/reportsMobileTruthStates.v1.test.js
           src/pages/returnsCorrections/taxReportsAuthority.v1.test.js
       - name: Build merged production Frontend
