@@ -67,6 +67,7 @@ func (c *Client) Fetch(ctx context.Context, currentETag string) (FetchResult, er
     var snapshot Snapshot
     if err := json.Unmarshal(limited, &snapshot); err != nil { return FetchResult{}, fmt.Errorf("decode central configuration: %w", err) }
     if snapshot.SchemaVersion <= 0 || snapshot.ETag == "" { return FetchResult{}, errors.New("central configuration response is incomplete") }
+    if snapshot.Scope.TenantID != "" && snapshot.Scope.TenantID != c.tenantID { return FetchResult{}, errors.New("central configuration tenant mismatch") }
     if snapshot.Scope.DeviceID != "" && snapshot.Scope.DeviceID != c.deviceID { return FetchResult{}, errors.New("central configuration device mismatch") }
     return FetchResult{Changed: true, Snapshot: snapshot}, nil
 }
