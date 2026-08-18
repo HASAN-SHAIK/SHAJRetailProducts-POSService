@@ -46,11 +46,11 @@ jobs:
       - name: Checkout POS Service candidate
         uses: actions/checkout@v4
 
-      - name: Checkout Backend category snapshot dependency
+      - name: Checkout merged Backend main
         uses: actions/checkout@v4
         with:
           repository: HASAN-SHAIK/SHAJRetailProducts-Backend
-          ref: v1/reporting-category-snapshots
+          ref: main
           path: backend
 
       - name: Set up Go
