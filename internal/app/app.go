@@ -177,7 +177,7 @@ func corsMiddleware(allowed []string, next http.Handler) http.Handler {
             if _, ok := allowedSet[origin]; !ok { writeJSON(w, http.StatusForbidden, map[string]any{"code": "origin_not_allowed"}); return }
             w.Header().Set("Access-Control-Allow-Origin", origin)
             w.Header().Set("Access-Control-Allow-Credentials", "true")
-            w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-POS-Local-Token")
+            w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-POS-Local-Token, X-POS-Session-Token, X-POS-Approval-Token")
             w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             w.Header().Add("Vary", "Origin")
         }

@@ -14,9 +14,10 @@ import (
 )
 
 var (
-	ErrNotFound        = errors.New("order not found")
-	ErrInvalidOrder    = errors.New("invalid order")
-	ErrAlreadyComplete = errors.New("order already completed")
+	ErrNotFound         = errors.New("order not found")
+	ErrInvalidOrder     = errors.New("invalid order")
+	ErrAlreadyComplete  = errors.New("order already completed")
+	ErrCustomerNotFound = errors.New("customer not found")
 )
 
 type DiscountPolicy struct {
@@ -158,6 +159,18 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 		return Order{}, err
 	}
 
+	customerID := input.CustomerID.StringPtr()
+	if customerID != nil {
+		var exists int
+		err := s.db.SQL().QueryRowContext(ctx, `SELECT 1 FROM customers WHERE id = ?`, *customerID).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			return Order{}, ErrCustomerNotFound
+		}
+		if err != nil {
+			return Order{}, fmt.Errorf("validate customer %s: %w", *customerID, err)
+		}
+	}
+
 	orderID := newID("ord")
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	var built []Item
@@ -239,7 +252,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 
 	order := Order{
 		ID: orderID, ClientOrderID: input.ClientOrderID, StoreID: input.StoreID, TerminalID: input.TerminalID,
-		CustomerID: input.CustomerID.StringPtr(), Status: "confirmed", Currency: input.Currency, SubtotalMinor: subtotal,
+		CustomerID: customerID, Status: "confirmed", Currency: input.Currency, SubtotalMinor: subtotal,
 		DiscountMinor: discount, TaxMinor: tax, TotalMinor: total, Notes: input.Notes, Version: 1,
 		CreatedAt: now, UpdatedAt: now, Items: built,
 	}

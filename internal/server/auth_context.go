@@ -59,7 +59,13 @@ func (s *Server) localAuthMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authContextKey{}, internal)))
 			return
 		}
-		machineOnly := r.URL.Path == "/api/v1/auth/enroll" || r.URL.Path == "/api/v1/auth/login" || r.URL.Path == "/api/v1/device" || r.URL.Path == "/api/v1/device/registration" || r.URL.Path == "/api/v1/device/heartbeat"
+		machineOnly := r.URL.Path == "/api/v1/auth/enroll" ||
+			r.URL.Path == "/api/v1/auth/login" ||
+			r.URL.Path == "/api/v1/device" ||
+			r.URL.Path == "/api/v1/device/registration" ||
+			r.URL.Path == "/api/v1/device/heartbeat" ||
+			r.URL.Path == "/api/v1/diagnostics" ||
+			r.URL.Path == "/api/v1/diagnostics/sync-events"
 		if machineOnly { next.ServeHTTP(w, r); return }
 		token := strings.TrimSpace(r.Header.Get("X-POS-Session-Token"))
 		user, err := s.localAuth.Authenticate(r.Context(), token)
