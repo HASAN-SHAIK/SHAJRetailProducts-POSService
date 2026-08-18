@@ -5,6 +5,7 @@ import (
     "encoding/json"
     "net/http"
     "net/http/httptest"
+    "strings"
     "testing"
     "time"
 
@@ -74,4 +75,45 @@ func TestCheckpointDoesNotAdvanceWhenChangeFails(t *testing.T) {
     cursor, err := puller.cursor(context.Background())
     if err != nil { t.Fatal(err) }
     if cursor != "" { t.Fatalf("checkpoint advanced after failed change: %s", cursor) }
+}
+
+func TestFutureSchemaFailsClosedWithoutProjectionOrCursorAdvance(t *testing.T) {
+    db := testutil.OpenDatabase(t)
+    inboxService := inbox.New(db)
+    server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        _ = json.NewEncoder(w).Encode(map[string]any{
+            "cursor": "cursor-future",
+            "has_more": false,
+            "changes": []map[string]any{{
+                "id": "product:future:v2",
+                "type": "catalog.product.upsert",
+                "schema_version": 2,
+                "source": "central",
+                "payload": map[string]any{
+                    "id": "future-1", "name": "Future Milk", "is_active": true,
+                    "allow_manual_price": false, "track_inventory": true,
+                    "version": 2,
+                },
+            }},
+        })
+    }))
+    defer server.Close()
+
+    puller := New(db, inboxService, server.URL, "tenant-1", "secret", "dev-1", time.Second, time.Second)
+    _, err := puller.pullOnce(context.Background())
+    if err == nil || !strings.Contains(err.Error(), "unsupported_change_schema:catalog.product.upsert:v2") {
+        t.Fatalf("expected explicit future schema rejection, got %v", err)
+    }
+
+    cursor, err := puller.cursor(context.Background())
+    if err != nil { t.Fatal(err) }
+    if cursor != "" { t.Fatalf("checkpoint advanced after future schema rejection: %s", cursor) }
+
+    var products int
+    if err := db.SQL().QueryRow(`SELECT COUNT(*) FROM catalog_products WHERE id='future-1'`).Scan(&products); err != nil { t.Fatal(err) }
+    if products != 0 { t.Fatalf("future schema mutated catalog: count=%d", products) }
+
+    var inboxRows int
+    if err := db.SQL().QueryRow(`SELECT COUNT(*) FROM inbox_messages WHERE message_id='product:future:v2'`).Scan(&inboxRows); err != nil { t.Fatal(err) }
+    if inboxRows != 0 { t.Fatalf("future schema entered V1 inbox: count=%d", inboxRows) }
 }
