@@ -1,6 +1,6 @@
 # SHAJRetailProducts V1 Database Migration / Upgrade / Backup / Recovery Acceptance Matrix
 
-Status: **IN PROGRESS — FINAL RELEASE GATE PENDING**
+Status: **RELEASE CERTIFIED — FROZEN EXCEPT FOR REAL DEFECTS**
 
 ## Authority boundary
 
@@ -36,7 +36,7 @@ Status: **IN PROGRESS — FINAL RELEASE GATE PENDING**
 | Cross-tenant recovery safety | Backend #97 rejects restoring a backup manifest into a different tenant database before destructive restore work | CERTIFIED | preserve exact backup-tenant/target binding |
 | Upgrade rollback/recovery policy | Backend #100 defines and tests forward-fix as the default for recoverable schema/application defects and verified same-tenant native restore as the exception for destructive/corrupt state | CERTIFIED | preserve immutable forward migration history and verified restore stop conditions |
 | Release diagnostics | Backend #100 ties the operator runbook to typed migration/backup/restore failure codes and secret-safe diagnostics; POS retains migration/restore integrity outcomes | CERTIFIED | surface actionable tenant/migration/checksum/backup/smoke facts without secrets or silent partial success |
-| Cross-repository release acceptance | final merged-main database-quality release workflow added in the release-certification PR | PARTIAL | all POS fresh/upgrade/backup/restore and merged Backend migration/fresh/existing/native-recovery gates must pass together |
+| Cross-repository release acceptance | POSService #278 final database-quality workflow runs POS migration/backup/full package/vet/build plus merged Backend migration policy, fresh tenant, existing tenant and native recovery acceptance | CERTIFIED | preserve this merged-main release gate on database-quality matrix changes |
 
 ## Current certified evidence
 
@@ -50,12 +50,12 @@ Status: **IN PROGRESS — FINAL RELEASE GATE PENDING**
 - POSService #270 — fresh-install migration, exact migration ledger, rerun, checksum drift, transactional failure rollback and integrity acceptance.
 - POSService #272 — verified SQLite snapshot, corrupt-candidate rejection and restore preservation of durable outbox/inbox facts.
 - POSService #275 — representative previous-schema → current-schema upgrade preserving metadata, pending outbox, applied inbox and local-auth facts.
+- POSService #278 — final database-quality release gate combining POS and merged Backend evidence.
 
 ## Remaining ordered work
 
-1. Pass the final merged-main database-quality release workflow across POSService and Backend.
-2. If green, change the release row to CERTIFIED, mark this domain RELEASE CERTIFIED, and freeze it except for real defects.
+None for V1. Re-open this domain only for a real migration, upgrade, backup, restore, integrity, tenant-isolation, or data-loss defect.
 
 ## Release decision
 
-**NOT YET RELEASE CERTIFIED.** Every functional migration/upgrade/backup/recovery row is now CERTIFIED or explicitly justified N/A. The only remaining blocker is the final merged-main database-quality release gate.
+**V1 DATABASE MIGRATION / UPGRADE / BACKUP / RECOVERY RELEASE CERTIFIED.** Every V1 row is CERTIFIED or explicitly justified N/A. The domain is frozen except for real defects.
