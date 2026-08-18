@@ -14,15 +14,15 @@ import (
 )
 
 var (
-	ErrNotFound                = errors.New("order not found")
-	ErrInvalidOrder            = errors.New("invalid order")
-	ErrAlreadyComplete         = errors.New("order already completed")
-	ErrPriceOverrideNotAllowed = errors.New("price override not allowed")
-	ErrDiscountNotAllowed      = errors.New("discount not allowed")
-	ErrDiscountLimitExceeded   = errors.New("discount limit exceeded")
+	ErrNotFound                 = errors.New("order not found")
+	ErrInvalidOrder             = errors.New("invalid order")
+	ErrAlreadyComplete          = errors.New("order already completed")
+	ErrPriceOverrideNotAllowed  = errors.New("price override not allowed")
+	ErrDiscountNotAllowed       = errors.New("discount not allowed")
+	ErrDiscountLimitExceeded    = errors.New("discount limit exceeded")
 	ErrPricingPolicyUnavailable = errors.New("pricing policy unavailable")
-	ErrTaxPolicyUnavailable    = errors.New("tax policy unavailable")
-	ErrCustomerNotFound = errors.New("customer not found")
+	ErrTaxPolicyUnavailable     = errors.New("tax policy unavailable")
+	ErrCustomerNotFound         = errors.New("customer not found")
 )
 
 type DiscountPolicy struct {
@@ -148,6 +148,8 @@ type Item struct {
 	QuantityMilli  int64   `json:"quantity_milli"`
 	UnitPriceMinor int64   `json:"unit_price_minor"`
 	DiscountMinor  int64   `json:"discount_minor"`
+	TaxableMinor   *int64  `json:"taxable_minor,omitempty"`
+	GSTRateBps     *int64  `json:"gst_rate_bps,omitempty"`
 	TaxMinor       int64   `json:"tax_minor"`
 	LineTotalMinor int64   `json:"line_total_minor"`
 	TaxCode        *string `json:"tax_code,omitempty"`
@@ -271,7 +273,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 		built = append(built, Item{
 			ID: newID("itm"), LineNo: i + 1, ProductID: product.ID, SKU: product.SKU, ProductName: product.Name,
 			Barcode: barcode, QuantityMilli: in.QuantityMilli, UnitPriceMinor: price, DiscountMinor: in.DiscountMinor,
-			TaxMinor: lineTax, LineTotalMinor: lineTotal, TaxCode: product.TaxCode,
+			TaxableMinor: &taxable, GSTRateBps: product.GSTRateBps, TaxMinor: lineTax, LineTotalMinor: lineTotal, TaxCode: product.TaxCode,
 		})
 		subtotal += gross
 		discount += in.DiscountMinor
@@ -298,10 +300,10 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 
 		for _, item := range order.Items {
 			if _, err := tx.ExecContext(ctx, `
-                INSERT INTO sales_order_items(id,order_id,line_no,product_id,sku,product_name,barcode,quantity_milli,unit_price_minor,discount_minor,tax_minor,line_total_minor,tax_code,created_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                INSERT INTO sales_order_items(id,order_id,line_no,product_id,sku,product_name,barcode,quantity_milli,unit_price_minor,discount_minor,taxable_minor,gst_rate_bps,tax_minor,line_total_minor,tax_code,created_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				item.ID, order.ID, item.LineNo, item.ProductID, item.SKU, item.ProductName, item.Barcode,
-				item.QuantityMilli, item.UnitPriceMinor, item.DiscountMinor, item.TaxMinor, item.LineTotalMinor, item.TaxCode, now,
+				item.QuantityMilli, item.UnitPriceMinor, item.DiscountMinor, item.TaxableMinor, item.GSTRateBps, item.TaxMinor, item.LineTotalMinor, item.TaxCode, now,
 			); err != nil {
 				return err
 			}
@@ -405,7 +407,7 @@ func (s *Service) getOne(ctx context.Context, where string, value any) (Order, e
 		return Order{}, err
 	}
 	rows, err := s.db.SQL().QueryContext(ctx, `
-        SELECT id,line_no,product_id,sku,product_name,barcode,quantity_milli,unit_price_minor,discount_minor,tax_minor,line_total_minor,tax_code
+        SELECT id,line_no,product_id,sku,product_name,barcode,quantity_milli,unit_price_minor,discount_minor,taxable_minor,gst_rate_bps,tax_minor,line_total_minor,tax_code
         FROM sales_order_items WHERE order_id=? ORDER BY line_no`, o.ID)
 	if err != nil {
 		return Order{}, err
@@ -413,7 +415,7 @@ func (s *Service) getOne(ctx context.Context, where string, value any) (Order, e
 	defer rows.Close()
 	for rows.Next() {
 		var i Item
-		if err := rows.Scan(&i.ID, &i.LineNo, &i.ProductID, &i.SKU, &i.ProductName, &i.Barcode, &i.QuantityMilli, &i.UnitPriceMinor, &i.DiscountMinor, &i.TaxMinor, &i.LineTotalMinor, &i.TaxCode); err != nil {
+		if err := rows.Scan(&i.ID, &i.LineNo, &i.ProductID, &i.SKU, &i.ProductName, &i.Barcode, &i.QuantityMilli, &i.UnitPriceMinor, &i.DiscountMinor, &i.TaxableMinor, &i.GSTRateBps, &i.TaxMinor, &i.LineTotalMinor, &i.TaxCode); err != nil {
 			return Order{}, err
 		}
 		o.Items = append(o.Items, i)
