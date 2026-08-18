@@ -106,6 +106,7 @@ jobs:
             id BIGSERIAL PRIMARY KEY,
             client_order_id TEXT,
             customer_id BIGINT,
+            branch_id UUID,
             total_price NUMERIC(14,2) NOT NULL DEFAULT 0,
             total_paid NUMERIC(14,2) NOT NULL DEFAULT 0,
             returned_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
@@ -176,6 +177,8 @@ jobs:
           SQL
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-08-canonical-pos-orders.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-08-pos-cashier-audit.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-18-pos-sale-tax-snapshots.sql
+          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-18-pos-sale-category-snapshots.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-09-pos-sale-returned.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-09-pos-partial-returned.sql
 

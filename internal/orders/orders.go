@@ -139,20 +139,22 @@ type Order struct {
 }
 
 type Item struct {
-	ID             string  `json:"id"`
-	LineNo         int     `json:"line_no"`
-	ProductID      string  `json:"product_id"`
-	SKU            *string `json:"sku,omitempty"`
-	ProductName    string  `json:"product_name"`
-	Barcode        *string `json:"barcode,omitempty"`
-	QuantityMilli  int64   `json:"quantity_milli"`
-	UnitPriceMinor int64   `json:"unit_price_minor"`
-	DiscountMinor  int64   `json:"discount_minor"`
-	TaxableMinor   *int64  `json:"taxable_minor,omitempty"`
-	GSTRateBps     *int64  `json:"gst_rate_bps,omitempty"`
-	TaxMinor       int64   `json:"tax_minor"`
-	LineTotalMinor int64   `json:"line_total_minor"`
-	TaxCode        *string `json:"tax_code,omitempty"`
+	ID                   string  `json:"id"`
+	LineNo               int     `json:"line_no"`
+	ProductID            string  `json:"product_id"`
+	SKU                  *string `json:"sku,omitempty"`
+	ProductName          string  `json:"product_name"`
+	Barcode              *string `json:"barcode,omitempty"`
+	CategoryIDSnapshot   *string `json:"category_id,omitempty"`
+	CategoryNameSnapshot *string `json:"category_name,omitempty"`
+	QuantityMilli        int64   `json:"quantity_milli"`
+	UnitPriceMinor       int64   `json:"unit_price_minor"`
+	DiscountMinor        int64   `json:"discount_minor"`
+	TaxableMinor         *int64  `json:"taxable_minor,omitempty"`
+	GSTRateBps           *int64  `json:"gst_rate_bps,omitempty"`
+	TaxMinor             int64   `json:"tax_minor"`
+	LineTotalMinor       int64   `json:"line_total_minor"`
+	TaxCode              *string `json:"tax_code,omitempty"`
 }
 
 func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) {
@@ -199,6 +201,23 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 		if err != nil {
 			return Order{}, fmt.Errorf("load product %s: %w", productID, err)
 		}
+
+		var categoryIDSnapshot *string
+		var categoryNameSnapshot *string
+		if product.CategoryID != nil && strings.TrimSpace(*product.CategoryID) != "" {
+			categoryID := strings.TrimSpace(*product.CategoryID)
+			categoryIDSnapshot = &categoryID
+			category, categoryErr := s.catalog.GetCategory(ctx, categoryID)
+			if categoryErr == nil {
+				categoryName := strings.TrimSpace(category.Name)
+				if categoryName != "" {
+					categoryNameSnapshot = &categoryName
+				}
+			} else if !errors.Is(categoryErr, catalog.ErrNotFound) {
+				return Order{}, fmt.Errorf("load category %s for product %s: %w", categoryID, productID, categoryErr)
+			}
+		}
+
 		price := int64(0)
 		if in.UnitPriceMinor != nil {
 			if *in.UnitPriceMinor < 0 {
@@ -272,7 +291,8 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 		}
 		built = append(built, Item{
 			ID: newID("itm"), LineNo: i + 1, ProductID: product.ID, SKU: product.SKU, ProductName: product.Name,
-			Barcode: barcode, QuantityMilli: in.QuantityMilli, UnitPriceMinor: price, DiscountMinor: in.DiscountMinor,
+			Barcode: barcode, CategoryIDSnapshot: categoryIDSnapshot, CategoryNameSnapshot: categoryNameSnapshot,
+			QuantityMilli: in.QuantityMilli, UnitPriceMinor: price, DiscountMinor: in.DiscountMinor,
 			TaxableMinor: &taxable, GSTRateBps: product.GSTRateBps, TaxMinor: lineTax, LineTotalMinor: lineTotal, TaxCode: product.TaxCode,
 		})
 		subtotal += gross
@@ -300,10 +320,11 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 
 		for _, item := range order.Items {
 			if _, err := tx.ExecContext(ctx, `
-                INSERT INTO sales_order_items(id,order_id,line_no,product_id,sku,product_name,barcode,quantity_milli,unit_price_minor,discount_minor,taxable_minor,gst_rate_bps,tax_minor,line_total_minor,tax_code,created_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                INSERT INTO sales_order_items(id,order_id,line_no,product_id,sku,product_name,barcode,category_id_snapshot,category_name_snapshot,quantity_milli,unit_price_minor,discount_minor,taxable_minor,gst_rate_bps,tax_minor,line_total_minor,tax_code,created_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				item.ID, order.ID, item.LineNo, item.ProductID, item.SKU, item.ProductName, item.Barcode,
-				item.QuantityMilli, item.UnitPriceMinor, item.DiscountMinor, item.TaxableMinor, item.GSTRateBps, item.TaxMinor, item.LineTotalMinor, item.TaxCode, now,
+				item.CategoryIDSnapshot, item.CategoryNameSnapshot, item.QuantityMilli, item.UnitPriceMinor, item.DiscountMinor,
+				item.TaxableMinor, item.GSTRateBps, item.TaxMinor, item.LineTotalMinor, item.TaxCode, now,
 			); err != nil {
 				return err
 			}
@@ -407,7 +428,7 @@ func (s *Service) getOne(ctx context.Context, where string, value any) (Order, e
 		return Order{}, err
 	}
 	rows, err := s.db.SQL().QueryContext(ctx, `
-        SELECT id,line_no,product_id,sku,product_name,barcode,quantity_milli,unit_price_minor,discount_minor,taxable_minor,gst_rate_bps,tax_minor,line_total_minor,tax_code
+        SELECT id,line_no,product_id,sku,product_name,barcode,category_id_snapshot,category_name_snapshot,quantity_milli,unit_price_minor,discount_minor,taxable_minor,gst_rate_bps,tax_minor,line_total_minor,tax_code
         FROM sales_order_items WHERE order_id=? ORDER BY line_no`, o.ID)
 	if err != nil {
 		return Order{}, err
@@ -415,7 +436,7 @@ func (s *Service) getOne(ctx context.Context, where string, value any) (Order, e
 	defer rows.Close()
 	for rows.Next() {
 		var i Item
-		if err := rows.Scan(&i.ID, &i.LineNo, &i.ProductID, &i.SKU, &i.ProductName, &i.Barcode, &i.QuantityMilli, &i.UnitPriceMinor, &i.DiscountMinor, &i.TaxableMinor, &i.GSTRateBps, &i.TaxMinor, &i.LineTotalMinor, &i.TaxCode); err != nil {
+		if err := rows.Scan(&i.ID, &i.LineNo, &i.ProductID, &i.SKU, &i.ProductName, &i.Barcode, &i.CategoryIDSnapshot, &i.CategoryNameSnapshot, &i.QuantityMilli, &i.UnitPriceMinor, &i.DiscountMinor, &i.TaxableMinor, &i.GSTRateBps, &i.TaxMinor, &i.LineTotalMinor, &i.TaxCode); err != nil {
 			return Order{}, err
 		}
 		o.Items = append(o.Items, i)
