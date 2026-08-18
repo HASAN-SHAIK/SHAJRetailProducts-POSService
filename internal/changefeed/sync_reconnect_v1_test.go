@@ -26,7 +26,7 @@ func TestV1ReconnectConvergesConfigAndChangeFeedAfterSQLiteRestart(t *testing.T)
         }
 
         switch r.URL.Path {
-        case "/api/v1/pos/configuration/effective":
+        case "/api/v1/sync/config/effective":
             if generation.Load() == 0 {
                 _ = json.NewEncoder(w).Encode(effectiveconfig.Snapshot{
                     SchemaVersion: 1,
