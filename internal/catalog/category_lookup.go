@@ -10,7 +10,9 @@ import (
 
 // GetCategory returns the Central-projected category currently held in the POS
 // SQLite catalog. Callers use this only to snapshot the category fact that was
-// known locally when an offline sale completed.
+// known locally when an offline sale completed. Inactive categories remain
+// readable here so historical sale identity is not lost when a category is
+// deactivated after it was projected to the device.
 func (r *Repository) GetCategory(ctx context.Context, id string) (Category, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -20,7 +22,7 @@ func (r *Repository) GetCategory(ctx context.Context, id string) (Category, erro
 	err := r.db.SQL().QueryRowContext(ctx, `
         SELECT id, parent_id, name, code, sort_order
         FROM catalog_categories
-        WHERE id = ? AND is_active = 1`, id).Scan(
+        WHERE id = ?`, id).Scan(
 		&category.ID, &category.ParentID, &category.Name, &category.Code, &category.SortOrder,
 	)
 	if err != nil {
