@@ -30,19 +30,20 @@ Status: **IN PROGRESS**
 | Central migration history/drift detection | Backend #95 records migration filename + SHA-256 in `tenant_schema_migrations`; same checksum reruns skip and historical drift rolls back/fails closed | CERTIFIED | migration filenames/content remain immutable after application |
 | Central fresh tenant schema | Backend #96 makes the bootstrap path apply an explicit audited V1 overlay list for certified auth/inventory/customer/reporting structures missing from the baseline; real fresh-tenant PostgreSQL smoke remains outstanding | PARTIAL | provision a real fresh tenant at current V1 schema and pass core domain smoke checks |
 | Central existing-tenant upgrade | domain PostgreSQL E2Es apply many migrations individually | PARTIAL | run the ordered production migration path against an older representative tenant and verify retained data |
-| Central backup export | admin-only JSON tenant support export exists in data-quality surfaces; it is not considered a full PostgreSQL recovery archive | PARTIAL | certify native PostgreSQL backup integrity/tenant binding and keep support export non-canonical for restore |
-| Central backup verification | JSON support export has checksum verification; native PostgreSQL recovery verification is under database-quality hardening | PARTIAL | certify archive checksum + archive readability before restore |
-| Central restore | no merged production restore workflow has been release-certified | GAP | require verified same-tenant restore, transactional failure behavior and post-restore consistency checks |
-| Cross-tenant safety | prior domains certify tenant pool isolation; migration/backup/restore-specific cross-tenant acceptance is incomplete | PARTIAL | prove one tenant backup cannot be restored into another tenant target and migrations remain tenant-scoped |
-| Upgrade rollback policy | POS recovery preserves pre-restore state and validates snapshots; Central policy is not yet release-certified | PARTIAL | certify Central forward-fix/native restore policy and failure behavior |
-| Release diagnostics | Central migration failures expose exact failed tenants; POS validates migration/restore integrity, but unified Central backup/recovery outcome evidence remains incomplete | PARTIAL | expose actionable migration/backup/recovery outcome without secrets or silent partial success |
-| Cross-repository release acceptance | no database-quality release gate yet | GAP | final merged Backend + POS acceptance for fresh install, upgrade, failure, integrity, backup/restore and isolation |
+| Central JSON support export | admin-only JSON tenant support export remains a support/data-quality artifact and is not canonical PostgreSQL restore authority | N/A | keep it admin/tenant scoped; canonical recovery uses the native PostgreSQL path |
+| Central native backup verification | Backend #97 creates a pg_dump custom archive, chmods archive/manifest 0600, binds SHA-256 + tenant DB identity, and verifies archive readability with `pg_restore --list` | CERTIFIED | verify checksum and archive readability before every restore |
+| Central native restore | Backend #97 uses exact tenant confirmation, same-tenant manifest binding, `pg_restore --single-transaction --exit-on-error`, and a post-restore core-table smoke check; real PostgreSQL acceptance preserves canonical facts | CERTIFIED | preserve verified same-tenant transactional restore and post-restore consistency check |
+| Cross-tenant recovery safety | Backend #97 rejects restoring a backup manifest into a different tenant database before destructive restore work | CERTIFIED | preserve exact backup-tenant/target binding |
+| Upgrade rollback policy | POS preserves pre-restore evidence and validates snapshots; Central now has a verified native restore path but the explicit forward-fix/rollback operator policy remains incomplete | PARTIAL | document and test when to forward-fix versus invoke native restore |
+| Release diagnostics | Central migration failures expose exact failed tenants; native backup/restore returns typed fail-closed outcomes; POS validates migration/restore integrity, but the final unified operational checklist remains incomplete | PARTIAL | expose actionable migration/backup/recovery outcomes without secrets or silent partial success |
+| Cross-repository release acceptance | no final database-quality release gate yet | GAP | final merged Backend + POS acceptance for fresh install, upgrade, failure, integrity, backup/restore and isolation |
 
 ## Current certified evidence
 
 - Backend #94 — fail-closed, transactional fleet tenant migration execution.
 - Backend #95 — per-tenant migration history, idempotent rerun and checksum-drift rejection.
 - Backend #96 — fresh-tenant bootstrap now applies an explicit audited V1 overlay list for certified schema facts missing from the baseline.
+- Backend #97 — native PostgreSQL backup, SHA-256/archive verification, same-tenant transactional restore, tamper rejection, cross-tenant restore rejection and post-restore smoke acceptance.
 - POSService #270 — fresh-install migration, exact migration ledger, rerun, checksum drift, transactional failure rollback and integrity acceptance.
 - POSService #272 — verified SQLite snapshot, corrupt-candidate rejection and restore preservation of durable outbox/inbox facts.
 - POSService #275 — representative previous-schema → current-schema upgrade preserving metadata, pending outbox, applied inbox and local-auth facts.
@@ -50,10 +51,9 @@ Status: **IN PROGRESS**
 ## Remaining ordered work
 
 1. Run a real fresh-tenant PostgreSQL provisioning smoke and a representative existing-tenant ordered upgrade using the production migration path.
-2. Certify Central native PostgreSQL backup verification/restore boundaries, cross-tenant isolation and the supported forward-fix/restore policy.
-3. Close database-quality operational diagnostics and post-restore consistency evidence.
-4. Add final merged-main database migration/recovery release acceptance and mark every row CERTIFIED or explicitly justified N/A.
+2. Close Central forward-fix/rollback policy and database-quality operational diagnostics.
+3. Add final merged-main database migration/recovery release acceptance and mark every row CERTIFIED or explicitly justified N/A.
 
 ## Release decision
 
-**NOT YET RELEASE CERTIFIED.** POS fresh-install/rerun/failure/upgrade and verified SQLite backup/restore are certified. Central fleet migrations and migration checksum history are certified, and fresh-tenant schema drift is contained through explicit V1 overlays. Remaining release blockers are real fresh/existing-tenant PostgreSQL upgrade smoke, Central native backup/restore quality and isolation, operational recovery diagnostics, and the final merged-main database-quality gate.
+**NOT YET RELEASE CERTIFIED.** POS fresh-install/rerun/failure/upgrade and verified SQLite backup/restore are certified. Central fleet migrations, checksum history, and native PostgreSQL backup/restore with tenant binding are certified; fresh-tenant schema drift is contained through explicit V1 overlays. Remaining release blockers are real fresh/existing-tenant PostgreSQL upgrade smoke, explicit recovery policy/diagnostics, and the final merged-main database-quality gate.
