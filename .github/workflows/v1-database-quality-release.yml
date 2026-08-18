@@ -1,0 +1,94 @@
+name: V1 Database Quality release acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'docs/V1_DATABASE_MIGRATION_RECOVERY_ACCEPTANCE_MATRIX.md'
+      - '.github/workflows/v1-database-quality-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pos-database-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+      - name: Run POS database migration quality acceptance
+        run: go test ./internal/database -run '^TestV1' -count=1
+      - name: Run POS backup restore acceptance
+        run: go test ./internal/backup -run '^TestV1' -count=1
+      - name: Test all POS packages
+        run: go test ./...
+      - name: Vet POS service
+        run: go vet ./...
+      - name: Build packaged POS runtime
+        run: go build ./cmd/posservice
+
+  backend-database-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+      PGPASSWORD: postgres
+      TEST_FRESH_TENANT_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/fresh_tenant_v1
+      TEST_EXISTING_TENANT_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/existing_tenant_v1
+      TEST_TENANT_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/tenant_v1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Backend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install PostgreSQL client tools
+        run: |
+          if ! command -v pg_dump >/dev/null 2>&1 || ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+          pg_dump --version
+          pg_restore --version
+          psql --version
+      - name: Create isolated V1 acceptance databases
+        run: |
+          psql -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE DATABASE fresh_tenant_v1;
+          CREATE DATABASE existing_tenant_v1;
+          CREATE DATABASE tenant_v1;
+          SQL
+      - name: Install Backend dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run migration and recovery policy acceptance
+        run: >-
+          npx jest
+          scripts/runTenantMigration.v1DatabaseQuality.test.js
+          scripts/databaseRecoveryPolicy.v1DatabaseQuality.test.js
+          --runInBand
+      - name: Run fresh tenant PostgreSQL acceptance
+        run: npx jest src/services/tenantProvisionService.v1Postgres.test.js --runInBand
+      - name: Run existing tenant PostgreSQL upgrade acceptance
+        run: npx jest scripts/runTenantMigration.v1PostgresUpgrade.test.js --runInBand
+      - name: Run native tenant backup restore acceptance
+        run: npx jest scripts/tenantDatabaseRecovery.v1Postgres.test.js --runInBand
