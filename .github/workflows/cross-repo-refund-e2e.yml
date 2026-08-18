@@ -106,6 +106,7 @@ jobs:
             id BIGSERIAL PRIMARY KEY,
             client_order_id TEXT,
             customer_id BIGINT,
+            branch_id UUID,
             total_price NUMERIC(14,2) NOT NULL DEFAULT 0,
             total_paid NUMERIC(14,2) NOT NULL DEFAULT 0,
             returned_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
