@@ -1,0 +1,82 @@
+name: V1 Reporting Admin release acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'docs/V1_REPORTING_ADMIN_ACCEPTANCE_MATRIX.md'
+      - '.github/workflows/v1-reporting-admin-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pos-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: Test all POS packages
+        run: go test ./...
+      - name: Vet POS service
+        run: go vet ./...
+      - name: Build packaged POS runtime
+        run: go build ./cmd/posservice
+
+  backend-reporting-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Backend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Backend dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run merged Backend Reporting/Admin acceptance
+        run: >-
+          npx jest
+          src/controllers/reportController.v1ReportingAcceptance.test.js
+          src/controllers/reportController.v1TenantIsolation.test.js
+          src/controllers/historicalSalesReportController.v1ReportingAcceptance.test.js
+          src/controllers/branchInventoryReportController.v1ReportingAcceptance.test.js
+          src/controllers/dailySalesReportController.v1ReportingAcceptance.test.js
+          src/controllers/customerOutstandingReportController.v1ReportingAcceptance.test.js
+          src/controllers/canonicalGstReportController.v1ReportingAcceptance.test.js
+          src/controllers/tenant/categoryPerformanceV1Controller.v1ReportingAcceptance.test.js
+          src/controllers/mobileController.v1ReportingAcceptance.test.js
+          src/controllers/dataQualityController.v1ReportingAcceptance.test.js
+          src/api/v1/modules/sync/posEvent.reportingBranch.test.js
+          src/api/v1/modules/sync/saleCompleted.categorySnapshot.test.js
+          src/middleware/dashboardReportScope.v1ReportingAcceptance.test.js
+          src/middleware/requireReportDateRange.v1ReportingAcceptance.test.js
+          --runInBand
+
+  frontend-reporting-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Frontend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run merged Frontend reporting acceptance
+        run: >-
+          CI=true npm test -- --watchAll=false
+          src/mobile/pages/reportsMobileTruthStates.v1.test.js
+          src/pages/returnsCorrections/taxReportsAuthority.v1.test.js
+      - name: Build merged production Frontend
+        run: CI=false npm run build
