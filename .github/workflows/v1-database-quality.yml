@@ -1,0 +1,27 @@
+name: V1 POS database quality acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'internal/database/**'
+      - '.github/workflows/v1-database-quality.yml'
+      - 'docs/V1_DATABASE_MIGRATION_RECOVERY_ACCEPTANCE_MATRIX.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sqlite-migration-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+      - name: Run V1 SQLite migration quality acceptance
+        run: go test ./internal/database -run '^TestV1' -count=1
+      - name: Build packaged POS runtime
+        run: go build ./cmd/posservice
