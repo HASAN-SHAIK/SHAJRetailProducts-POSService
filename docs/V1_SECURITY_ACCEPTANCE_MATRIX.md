@@ -23,24 +23,24 @@ Status: **IN PROGRESS**
 | POS local machine/origin boundary | Auth/Az V1 certifies protected loopback routes require machine token and approved browser origin | CERTIFIED | preserve public health/readiness exceptions only |
 | Request/error/diagnostic secret hygiene | Observability V1 certifies stable 5xx responses, safe bounded request IDs and credential-safe diagnostics | CERTIFIED | preserve no secret/query/payload leakage in support surfaces |
 | Migration/backup tenant protection | Database Quality V1 certifies checksum drift rejection, same-tenant native restore and cross-tenant restore protection | CERTIFIED | preserve verified manifest/checksum/tenant binding |
-| Secret defaults/fail-closed startup | Auth/Az requires Central tenant/platform JWT secrets; POS #289 requires the offline-grant public key in production, rejects known placeholder sync/local secret values, and preserves generated local-token mode | PARTIAL | finish repository-wide production secret/config audit; no production fallback/default secrets |
+| Secret defaults/fail-closed startup | Auth/Az requires Central tenant/platform JWT secrets; POS #289 requires the offline-grant public key in production and rejects placeholder sync/local secrets; Backend #108 requires an explicit production RabbitMQ URL when messaging is enabled and rejects embedded `guest:guest` credentials | PARTIAL | finish repository-wide production secret/config audit; no production fallback/default secrets |
 | Cookie/CORS/CSRF boundary | Auth/Az certifies HttpOnly `Secure`/`SameSite=Lax` browser cookies; Backend #106 rejects production credentialed wildcard CORS and permits only explicitly configured browser origins while retaining no-Origin machine clients | CERTIFIED | preserve explicit production origin allowlist and secure cookie flags |
 | Central login/brute-force protection | Backend #105 shares bounded login/refresh limiters across legacy and `/api/v1` tenant auth aliases; failed logins are capped without consuming allowance on successful logins; platform-admin login was already bounded | CERTIFIED | retain auth-sensitive rate limits without blocking health/sync operation |
-| Dependency/supply-chain review | Go modules and npm manifests/lockfiles exist across repos, but V1 vulnerability/dependency policy is not yet certified | GAP | audit runtime dependencies, remove clearly unused/risky packages where safe, document accepted residuals |
-| Upload/import input boundary | Product import and existing upload handlers have size/type validation in places; server-side filename/content/size authority needs consolidated audit | PARTIAL | bound upload sizes/types and avoid path/content execution trust |
+| Dependency/supply-chain review | POS Go dependency is checksum-pinned and Frontend has a lockfile, but Backend has no npm lockfile and Frontend still declares `jsonwebtoken` using the floating `latest` spec; repository-wide dependency policy is not yet certified | GAP | establish reproducible Backend dependency resolution, eliminate floating production specs, audit runtime dependencies and document accepted residuals |
+| Upload/import input boundary | Central JSON bodies are capped at 5 MB; Backend #107 additionally caps the admin offline product import at 500 rows before opening a tenant DB connection and returns stable 413 on oversized batches | PARTIAL | finish file/upload handler size/type/path audit; avoid path/content execution trust |
 | SQL/query injection boundary | Primary services use parameterized PostgreSQL queries in certified paths; repository-wide dynamic SQL/support/reporting audit remains open | PARTIAL | no caller-controlled SQL identifiers/fragments without strict allowlists |
 | Security-sensitive logging | Auth/Observability already removed password-hash/access-token/query leakage in certified paths | CERTIFIED | preserve credential-safe structured logging |
 | Recovery/approval authority separation | Inventory/Store/Device/Auth/Database domains keep Central-approved recovery separate from read-only support views | CERTIFIED | do not re-expand support or manager-approval authority |
 | Frontend secret persistence | Frontend Completion/Auth V1 certifies no Central JWT in JS-readable browser persistence | CERTIFIED | preserve metadata-only browser session persistence |
-| Security CI/release gate | focused Backend and POS Security workflows now exist; no final consolidated three-repository Security release gate yet | PARTIAL | merged Backend + POS + Frontend security acceptance/build must be green |
+| Security CI/release gate | focused Backend and POS Security workflows exist; no final consolidated three-repository Security release gate yet | PARTIAL | merged Backend + POS + Frontend security acceptance/build must be green |
 
 ## Current audit priorities
 
-1. Audit runtime dependencies and clearly suspicious/unused packages before changing versions blindly.
-2. Audit upload/import and dynamic-query boundaries that accept caller-controlled text/files.
+1. Establish dependency reproducibility: Backend lockfile policy and Frontend floating dependency specs.
+2. Finish the remaining file/upload and dynamic-query boundaries that accept caller-controlled text/files.
 3. Finish the production secret/config review across the three repositories.
 4. Add final merged-main Security release gate and mark every row CERTIFIED or explicitly justified N/A/accepted residual.
 
 ## Release decision
 
-**NOT YET RELEASE CERTIFIED.** Core tenant/store/device/token/session/recovery security is strongly covered; tenant-auth brute-force protection and the browser cookie/CORS boundary are now certified. Remaining V1 Security work is concentrated on the broader secret/config review, dependency/supply-chain review, upload/query boundary audit and the final consolidated release gate.
+**NOT YET RELEASE CERTIFIED.** Core tenant/store/device/token/session/recovery security is strongly covered; auth brute-force, browser cookie/CORS, bounded JSON/offline-import input, and production RabbitMQ credential boundaries are now executable evidence. Remaining V1 Security work is concentrated on dependency reproducibility/supply-chain review, the remaining file/upload/query boundaries, broader secret/config review and the final consolidated release gate.
