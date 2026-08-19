@@ -33,6 +33,8 @@ func NewSecure(
     if localAuth != nil {
         handler = localAuth.Middleware(handler)
     }
-    s.httpServer.Handler = requestMetricsMiddleware(handler)
+    // Correlation is outermost so even machine-auth failures receive the same
+    // bounded request ID in the response and structured completion log.
+    s.httpServer.Handler = requestCorrelationMiddleware(handler)
     return s
 }
