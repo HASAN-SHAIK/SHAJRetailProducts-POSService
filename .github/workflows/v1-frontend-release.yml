@@ -51,6 +51,10 @@ jobs:
           src/utils/legacyBrowserSyncAuthority.v1.test.js
           src/utils/browserPersistenceBoundary.v1.test.js
           src/pages/syncCenterAccess.v1.test.js
+          src/pages/syncCenterObservability.v1.test.js
+          src/pages/dashboardNetworkState.v1.test.js
+          src/mobile/pages/reportsMobileTruthStates.v1.test.js
+          src/pages/returnsCorrections/taxReportsAuthority.v1.test.js
           src/pages/billing/retailBillingCheckout.v1.test.js
           src/pages/billing/retailBillingProductSearchAuthority.v1.test.js
           src/components/Billing/productSearchInteraction.v1.test.js
@@ -62,6 +66,7 @@ jobs:
           src/components/common/PopUp/pricingPolicyMessages.v1.test.js
           src/Repositories/LocalPosProductRepository.batchAuthority.v1.test.js
           src/Repositories/localPosInventoryAuthority.v1.test.js
+          src/components/ProductsPage/stockModalStates.v1.test.js
           src/pages/customers/customerListStates.v1.test.js
           src/pages/returnsCorrections/salesReturnAuthority.v1.test.js
           src/components/returnsCorrections/returnsHeaderSyncAuthority.v1.test.js
