@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - 'internal/server/observability_health_v1_test.go'
+      - 'internal/server/request_correlation.go'
+      - 'internal/server/request_correlation_v1_test.go'
+      - 'internal/server/security.go'
       - 'internal/server/server.go'
       - 'internal/observability/**'
       - 'docs/V1_OBSERVABILITY_HEALTH_SUPPORT_ACCEPTANCE_MATRIX.md'
@@ -24,6 +27,8 @@ jobs:
           go-version-file: go.mod
       - name: Run V1 POS health/readiness acceptance
         run: go test ./internal/server -run 'TestV1POS(Health|Readiness)' -count=1
+      - name: Run V1 POS request correlation acceptance
+        run: go test ./internal/server -run 'TestV1POSRequestCorrelation|TestRequestIDFromContextDefaultsEmpty' -count=1
       - name: Run V1 POS summary/backup diagnostics acceptance
         run: go test ./internal/observability -run 'TestV1POSSummaryAndBackupDiagnostics' -count=1
       - name: Build packaged POS runtime
