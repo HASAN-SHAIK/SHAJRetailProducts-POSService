@@ -23,13 +23,13 @@ Status: **IN PROGRESS**
 | POS local-auth diagnostics | existing Auth/Az certification exposes counts/expiry/lock state without PIN/grant/session secrets | CERTIFIED | preserve credential-safe response |
 | POS backup observability | POSService #283 certifies latest SQLite `.db` backup selection plus timestamp/size while ignoring unrelated filesystem files | CERTIFIED | preserve missing/latest backup visibility without filesystem secrets |
 | POS diagnostics bounds | sync-event endpoint clamps requested result count to 1..500 | CERTIFIED | preserve bounded local support queries |
-| Central liveness | `/health` and `/api/health` expose uptime/timestamp and optional separately authorized warmup status; Backend #101 preserves warmup-before-query ordering | PARTIAL | add focused stable public liveness response acceptance |
+| Central liveness | Backend #104 certifies `/health` and `/api/health` as stable public liveness independent from required PostgreSQL readiness unless separately authorized warmup is requested | CERTIFIED | preserve stable secret-free liveness separate from readiness |
 | Central readiness | Backend #101 adds `/ready` and `/api/ready`, requiring master PostgreSQL and returning secret-free 503 on dependency failure | CERTIFIED | preserve minimal dependency readiness |
-| Central tenant operational diagnostics | existing admin/reporting/data-quality/device surfaces expose tenant-scoped audit, consistency, registration and recovery facts | PARTIAL | inventory exact support routes and certify auth/tenant isolation |
+| Central tenant operational diagnostics | Backend #93 certifies Central-admin protection, `req.tenantPool` isolation, bounded support queries and authenticated actor provenance across data-quality/support surfaces | CERTIFIED | preserve tenant-scoped admin/support authority and bounded output |
 | Central migration/recovery diagnostics | database-quality domain certifies typed tenant/migration/checksum/backup/restore outcomes and secret-safe runbook | CERTIFIED | preserve typed failure codes and secret exclusion |
 | Central request/error hygiene | Backend #102 keeps internal 5xx client responses stable/secret-free; Backend #103 adds bounded request IDs and response/log correlation without query-string logging | CERTIFIED | preserve stable errors and safe correlation fields |
 | POS request correlation | POS HTTP server returns `X-Request-ID`, but generation/input validation and log linkage are not yet V1-certified | PARTIAL | certify generated/preserved request ID and response/log correlation |
-| Health endpoint credential safety | POSService #281 and Backend #101 prove readiness failures do not expose dependency secrets; POS liveness is minimal | CERTIFIED | preserve secret-free public health/readiness responses |
+| Health endpoint credential safety | POSService #281 plus Backend #101/#104 prove public liveness/readiness failures do not expose dependency secrets | CERTIFIED | preserve secret-free public health/readiness responses |
 | Support recovery authority | existing Central-approved sync recovery, device recovery, database recovery and POS diagnostics remain separated from read-only support views | CERTIFIED | do not add support-side mutation authority |
 | Frontend support presentation | Sync Center/device/customer/inventory/reporting screens already consume read-only diagnostics in several domains | PARTIAL | certify final actionable health/support states without bypassing POS/Central authority |
 | Cross-repository release acceptance | no final Observability/Health release gate yet | GAP | merged POS + Backend + Frontend health/diagnostics/build acceptance |
@@ -41,6 +41,8 @@ Status: **IN PROGRESS**
 - Backend #101 adds and certifies minimal Central PostgreSQL readiness while preserving separate liveness/warmup semantics.
 - Backend #102 hardens the shared Central error boundary so internal 5xx messages/codes cannot leak database or infrastructure details to clients.
 - Backend #103 adds a shared Central request-correlation boundary: bounded safe caller IDs are preserved, unsafe/missing IDs are regenerated, and the same ID links the response to structured method/path/status/duration logging without query-string secrets.
+- Backend #104 certifies the public Central liveness contract independently from PostgreSQL readiness while preserving separately authorized warmup behavior.
+- Backend #93 certifies Central support/data-quality routes remain admin-protected, tenant-pool scoped and bounded, with authenticated actor provenance for support mutations.
 - POS packaged runtime starts observability collection and fails startup on migration/integrity errors.
 - POS diagnostics already include outbox/inbox/config/local-auth support state and bounded sync-event results.
 - Database Migration/Recovery V1 provides typed, secret-safe Central migration/backup/restore diagnostics.
@@ -49,10 +51,9 @@ Status: **IN PROGRESS**
 ## Remaining ordered work
 
 1. Certify POS request correlation: safe generated/preserved IDs plus response/log linkage.
-2. Certify Central stable liveness and tenant operational-diagnostics authorization/isolation.
-3. Close Frontend health/support presentation gaps only where a real operator-facing defect exists.
-4. Add final merged-main Observability/Health/Support release acceptance and mark every row CERTIFIED or explicitly justified N/A.
+2. Close Frontend health/support presentation gaps only where a real operator-facing defect exists.
+3. Add final merged-main Observability/Health/Support release acceptance and mark every row CERTIFIED or explicitly justified N/A.
 
 ## Release decision
 
-**NOT YET RELEASE CERTIFIED.** Core health/readiness, POS summary/backup diagnostics, Central request/error hygiene and public health credential safety are certified. Remaining work is concentrated on POS request correlation, Central liveness/tenant-support authorization/isolation, Frontend support presentation, and the final release gate.
+**NOT YET RELEASE CERTIFIED.** Core health/readiness, Central tenant-support isolation, POS summary/backup diagnostics, Central request/error hygiene and public health credential safety are certified. Remaining work is concentrated on POS request correlation, Frontend support presentation, and the final release gate.
