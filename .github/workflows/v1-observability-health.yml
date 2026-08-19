@@ -1,0 +1,28 @@
+name: V1 Observability Health acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'internal/server/observability_health_v1_test.go'
+      - 'internal/server/server.go'
+      - 'internal/observability/**'
+      - 'docs/V1_OBSERVABILITY_HEALTH_SUPPORT_ACCEPTANCE_MATRIX.md'
+      - '.github/workflows/v1-observability-health.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pos-health-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Run V1 POS health/readiness acceptance
+        run: go test ./internal/server -run 'TestV1POS(Health|Readiness)' -count=1
+      - name: Build packaged POS runtime
+        run: go build ./cmd/posservice
