@@ -24,5 +24,7 @@ jobs:
           go-version-file: go.mod
       - name: Run V1 POS health/readiness acceptance
         run: go test ./internal/server -run 'TestV1POS(Health|Readiness)' -count=1
+      - name: Run V1 POS summary/backup diagnostics acceptance
+        run: go test ./internal/observability -run 'TestV1POSSummaryAndBackupDiagnostics' -count=1
       - name: Build packaged POS runtime
         run: go build ./cmd/posservice
