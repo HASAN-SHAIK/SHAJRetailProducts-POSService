@@ -92,7 +92,36 @@ func Load() (Config, error) {
 	if len(cfg.AllowedOrigins) == 0 {
 		return Config{}, fmt.Errorf("POS_ALLOWED_ORIGINS must contain at least one origin")
 	}
+	if err := validateProductionSecurity(cfg); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+func validateProductionSecurity(cfg Config) error {
+	if !strings.EqualFold(strings.TrimSpace(cfg.Environment), "production") {
+		return nil
+	}
+	if strings.TrimSpace(cfg.OfflineGrantSecret) == "" {
+		return fmt.Errorf("POS_OFFLINE_GRANT_PUBLIC_KEY is required in production")
+	}
+	if cfg.CentralAPIURL != "" && isPlaceholderSecret(cfg.CentralSyncToken) {
+		return fmt.Errorf("POS_SYNC_TOKEN must not use a placeholder value in production")
+	}
+	if token := strings.TrimSpace(cfg.LocalAPIToken); token != "" && isPlaceholderSecret(token) {
+		return fmt.Errorf("POS_LOCAL_API_TOKEN must not use a placeholder value in production")
+	}
+	return nil
+}
+
+func isPlaceholderSecret(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "change-me", "changeme", "change-me-in-development", "replace-me", "replace_me", "default", "secret":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateLoopbackAddress(address string) error {
