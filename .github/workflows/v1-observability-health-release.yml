@@ -1,0 +1,81 @@
+name: V1 Observability Health Support release acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'docs/V1_OBSERVABILITY_HEALTH_SUPPORT_ACCEPTANCE_MATRIX.md'
+      - '.github/workflows/v1-observability-health-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pos-observability-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Run focused POS health and correlation acceptance
+        run: >-
+          go test ./internal/server
+          -run 'TestV1POS(Health|Readiness|RequestCorrelation)|TestRequestIDFromContextDefaultsEmpty'
+          -count=1
+      - name: Run focused POS summary/backup diagnostics acceptance
+        run: go test ./internal/observability -run 'TestV1POSSummaryAndBackupDiagnostics' -count=1
+      - name: Test all POS packages
+        run: go test ./...
+      - name: Vet POS service
+        run: go vet ./...
+      - name: Build packaged POS runtime
+        run: go build ./cmd/posservice
+
+  backend-observability-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+      NODE_ENV: test
+      APP_ENVIRONMENT: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Backend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Backend dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run merged Backend Observability/support acceptance
+        run: >-
+          npx jest
+          src/App.v1ObservabilityAcceptance.test.js
+          src/middleware/errorHandler.v1ObservabilityAcceptance.test.js
+          src/middleware/requestCorrelation.v1ObservabilityAcceptance.test.js
+          src/controllers/dataQualityController.v1ReportingAcceptance.test.js
+          --runInBand
+
+  frontend-observability-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Frontend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run merged Frontend observability presentation acceptance
+        run: >-
+          CI=true npm test -- --watchAll=false
+          src/pages/syncCenterAccess.v1.test.js
+          src/pages/syncCenterObservability.v1.test.js
+      - name: Build merged production Frontend
+        run: CI=false npm run build
