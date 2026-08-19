@@ -104,3 +104,44 @@ func TestLoadWrapsBase64OfflineGrantPublicKey(t *testing.T) {
 		t.Fatalf("OfflineGrantSecret = %q", cfg.OfflineGrantSecret)
 	}
 }
+
+func TestLoadProductionRequiresOfflineGrantPublicKey(t *testing.T) {
+	t.Setenv("POS_ENVIRONMENT", "production")
+	t.Setenv("POS_CENTRAL_API_URL", "")
+	t.Setenv("POS_OFFLINE_GRANT_PUBLIC_KEY", "")
+
+	_, err := Load()
+	if err == nil || err.Error() != "POS_OFFLINE_GRANT_PUBLIC_KEY is required in production" {
+		t.Fatalf("Load() error = %v", err)
+	}
+}
+
+func TestLoadProductionRejectsPlaceholderCentralSyncToken(t *testing.T) {
+	t.Setenv("POS_ENVIRONMENT", "production")
+	t.Setenv("POS_CENTRAL_API_URL", "https://central.example.test")
+	t.Setenv("POS_SYNC_TENANT_ID", "tenant-production")
+	t.Setenv("POS_SYNC_TOKEN", "change-me")
+	t.Setenv("POS_OFFLINE_GRANT_PUBLIC_KEY", "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A")
+
+	_, err := Load()
+	if err == nil || err.Error() != "POS_SYNC_TOKEN must not use a placeholder value in production" {
+		t.Fatalf("Load() error = %v", err)
+	}
+}
+
+func TestLoadProductionAllowsGeneratedLocalTokenAndNonPlaceholderSyncSecret(t *testing.T) {
+	t.Setenv("POS_ENVIRONMENT", "production")
+	t.Setenv("POS_CENTRAL_API_URL", "https://central.example.test")
+	t.Setenv("POS_SYNC_TENANT_ID", "tenant-production")
+	t.Setenv("POS_SYNC_TOKEN", "prod-sync-token-from-secret-store")
+	t.Setenv("POS_LOCAL_API_TOKEN", "")
+	t.Setenv("POS_OFFLINE_GRANT_PUBLIC_KEY", "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if cfg.LocalAPIToken != "" {
+		t.Fatalf("LocalAPIToken = %q; expected generated-token mode", cfg.LocalAPIToken)
+	}
+}
