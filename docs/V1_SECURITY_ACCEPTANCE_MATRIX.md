@@ -24,7 +24,7 @@ Status: **IN PROGRESS**
 | Request/error/diagnostic secret hygiene | Observability V1 certifies stable 5xx responses, safe bounded request IDs and credential-safe diagnostics | CERTIFIED | preserve no secret/query/payload leakage in support surfaces |
 | Migration/backup tenant protection | Database Quality V1 certifies checksum drift rejection, same-tenant native restore and cross-tenant restore protection | CERTIFIED | preserve verified manifest/checksum/tenant binding |
 | Secret defaults/fail-closed startup | Auth/Az requires Central tenant/platform JWT secrets; POS #289 requires the offline-grant public key in production, rejects known placeholder sync/local secret values, and preserves generated local-token mode | PARTIAL | finish repository-wide production secret/config audit; no production fallback/default secrets |
-| Cookie/CORS/CSRF boundary | Browser Auth uses HttpOnly `Secure`/`SameSite=Lax`; Central production credentialed-origin hardening is under separate exact-head validation | PARTIAL | certify explicit browser origins/credential behavior and reject unsafe cross-origin mutation paths |
+| Cookie/CORS/CSRF boundary | Auth/Az certifies HttpOnly `Secure`/`SameSite=Lax` browser cookies; Backend #106 rejects production credentialed wildcard CORS and permits only explicitly configured browser origins while retaining no-Origin machine clients | CERTIFIED | preserve explicit production origin allowlist and secure cookie flags |
 | Central login/brute-force protection | Backend #105 shares bounded login/refresh limiters across legacy and `/api/v1` tenant auth aliases; failed logins are capped without consuming allowance on successful logins; platform-admin login was already bounded | CERTIFIED | retain auth-sensitive rate limits without blocking health/sync operation |
 | Dependency/supply-chain review | Go modules and npm manifests/lockfiles exist across repos, but V1 vulnerability/dependency policy is not yet certified | GAP | audit runtime dependencies, remove clearly unused/risky packages where safe, document accepted residuals |
 | Upload/import input boundary | Product import and existing upload handlers have size/type validation in places; server-side filename/content/size authority needs consolidated audit | PARTIAL | bound upload sizes/types and avoid path/content execution trust |
@@ -36,12 +36,11 @@ Status: **IN PROGRESS**
 
 ## Current audit priorities
 
-1. Finish Central production CORS/cookie/CSRF acceptance.
-2. Audit runtime dependencies and clearly suspicious/unused packages before changing versions blindly.
-3. Audit upload/import and dynamic-query boundaries that accept caller-controlled text/files.
-4. Finish the production secret/config review across the three repositories.
-5. Add final merged-main Security release gate and mark every row CERTIFIED or explicitly justified N/A/accepted residual.
+1. Audit runtime dependencies and clearly suspicious/unused packages before changing versions blindly.
+2. Audit upload/import and dynamic-query boundaries that accept caller-controlled text/files.
+3. Finish the production secret/config review across the three repositories.
+4. Add final merged-main Security release gate and mark every row CERTIFIED or explicitly justified N/A/accepted residual.
 
 ## Release decision
 
-**NOT YET RELEASE CERTIFIED.** Core tenant/store/device/token/session/recovery security is strongly covered and tenant-auth brute-force protection is now certified. Remaining V1 Security work is concentrated on CORS/cookie/CSRF hardening, the broader secret/config review, dependency/supply-chain review, upload/query boundary audit and the final consolidated release gate.
+**NOT YET RELEASE CERTIFIED.** Core tenant/store/device/token/session/recovery security is strongly covered; tenant-auth brute-force protection and the browser cookie/CORS boundary are now certified. Remaining V1 Security work is concentrated on the broader secret/config review, dependency/supply-chain review, upload/query boundary audit and the final consolidated release gate.
