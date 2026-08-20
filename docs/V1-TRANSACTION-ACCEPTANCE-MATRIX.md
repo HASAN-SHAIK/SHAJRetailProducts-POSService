@@ -38,4 +38,8 @@ All authoritative transaction rows are now `CERTIFIED`.
 
 The release candidate must still pass the matrix-triggered exact-head `V1 POS edge acceptance` and `Cross-repo Order E2E` signals before this matrix update can merge. The other transaction journeys retain their previously green exact-head cross-repository evidence because this release-candidate change is documentation-only and does not alter POS, Backend, or Frontend runtime code.
 
-When those final signals are green and the PR is mergeable/review-clean, the V1 transaction core is release-certified. Transaction semantics are then frozen except for real defects, and engineering moves to the next V1 Retail OS domain: Inventory.
+When those final signals are green and the PR is mergeable/review-clean, the V1 transaction core is release-certified. Transaction semantics are then frozen except for real defects.
+
+## Final V1 release revalidation
+
+The final SHAJRetailProducts V1 release decision intentionally touches this authoritative matrix so the same real PostgreSQL `Cross-repo Order E2E` reruns on the exact final-release head. This revalidates Frontend/POS contract assumptions indirectly through the already-certified merged Frontend, persisted POS SQLite durable outbox, production Central sync route, PostgreSQL canonical projection and duplicate replay before the overall V1 release can be declared complete.
