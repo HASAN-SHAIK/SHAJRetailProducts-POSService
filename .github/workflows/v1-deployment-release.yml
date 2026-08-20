@@ -1,0 +1,87 @@
+name: V1 Deployment release acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'docs/V1_DEPLOYMENT_CONFIGURATION_ACCEPTANCE_MATRIX.md'
+      - 'docs/V1_DEPLOYMENT_RUNBOOK.md'
+      - '.github/workflows/v1-deployment-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pos-deployment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: Certify POS packaging and installer boundaries
+        run: go test ./internal/deployment ./internal/config
+      - name: Verify POS release provenance artifact
+        run: bash scripts/v1-deployment-provenance-acceptance.sh
+      - name: Test all POS packages
+        run: go test ./...
+      - name: Vet POS service
+        run: go vet ./...
+      - name: Build packaged POS runtime
+        run: go build ./cmd/posservice
+
+  backend-deployment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Backend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Certify Backend deployment secret rotation contract
+        run: npx jest tests/v1DeploymentSecretRotation.test.js --runInBand
+      - name: Build Backend production container
+        run: docker build --pull -t shajretail-backend:v1-deployment .
+
+  frontend-deployment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Frontend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Validate Frontend deployment context
+        run: node scripts/v1-deployment-frontend-acceptance.js
+      - name: Build production Frontend
+        run: CI=false npm run build
+      - name: Build production Frontend container
+        run: docker build --pull -t shajretail-frontend:v1-deployment .
+      - name: Verify nginx SPA static fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          cid="$(docker run -d -p 127.0.0.1:8080:80 shajretail-frontend:v1-deployment)"
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/ -o /tmp/root.html; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8080/nonexistent/v1/deep/link -o /tmp/fallback.html
+          test -s /tmp/root.html
+          cmp /tmp/root.html /tmp/fallback.html
