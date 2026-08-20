@@ -10,7 +10,7 @@ trap 'rm -rf "$TMP"' EXIT
 COMMIT="$(git rev-parse --verify HEAD)"
 VERSION="v1-provenance-test"
 
-VERSION="$VERSION" GIT_COMMIT="$COMMIT" OUT="$TMP" ./scripts/build-release.sh linux
+VERSION="$VERSION" GIT_COMMIT="$COMMIT" OUT="$TMP" bash ./scripts/build-release.sh linux
 
 test -f "$TMP/shajretail-pos-${VERSION}-linux-amd64"
 test -f "$TMP/SHA256SUMS.txt"
@@ -24,7 +24,7 @@ grep -Fx "checksums=SHA256SUMS.txt" "$TMP/RELEASE-MANIFEST.txt"
   sha256sum -c SHA256SUMS.txt
 )
 
-if VERSION="$VERSION" GIT_COMMIT="not-a-commit" OUT="$TMP/invalid" ./scripts/build-release.sh linux >/dev/null 2>&1; then
+if VERSION="$VERSION" GIT_COMMIT="not-a-commit" OUT="$TMP/invalid" bash ./scripts/build-release.sh linux >/dev/null 2>&1; then
   echo "build-release.sh accepted invalid source provenance" >&2
   exit 1
 fi
