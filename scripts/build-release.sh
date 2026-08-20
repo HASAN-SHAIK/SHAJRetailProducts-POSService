@@ -20,7 +20,7 @@ build() {
   local goos="$1" goarch="$2" ext="$3"
   local target="$OUT/shajretail-pos-${VERSION}-${goos}-${goarch}${ext}"
   echo "building $target"
-  CGO_ENABLED=1 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o "$target" ./cmd/posservice
+  CGO_ENABLED=1 GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.gitCommit=${GIT_COMMIT}" -o "$target" ./cmd/posservice
 }
 
 case "${1:-all}" in
