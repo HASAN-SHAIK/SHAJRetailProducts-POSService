@@ -1,0 +1,22 @@
+name: V1 POS deployment provenance
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/build-release.sh'
+      - 'scripts/v1-deployment-provenance-acceptance.sh'
+      - 'docs/PACKAGING.md'
+      - '.github/workflows/v1-deployment-pos-provenance.yml'
+
+jobs:
+  deployment-provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: Validate release artifact provenance
+        run: bash scripts/v1-deployment-provenance-acceptance.sh
