@@ -15,7 +15,15 @@ The service must bind only to loopback. Never expose port 4782 on the store LAN 
 
 ## Build
 
-Use `scripts/build-release.sh`. Every release artifact is accompanied by `SHA256SUMS.txt`. CGO is enabled because the SQLite driver is native.
+Use `scripts/build-release.sh`. Every release artifact is accompanied by `SHA256SUMS.txt` and `RELEASE-MANIFEST.txt`.
+
+The release manifest binds the artifact set to the exact source commit and version:
+
+- `version` is the release version supplied to the build;
+- `git_commit` is an exact 40-character Git commit SHA, resolved from the checkout unless explicitly supplied by CI;
+- `checksums` points to `SHA256SUMS.txt`, which must verify before installation.
+
+Release automation must retain the manifest and checksum file beside the installers/binaries. Do not relabel an artifact with a version or commit different from the manifest. CGO is enabled because the SQLite driver is native.
 
 ## First installation
 
@@ -30,9 +38,10 @@ Use `scripts/build-release.sh`. Every release artifact is accompanied by `SHA256
 
 1. Create or confirm a recent verified SQLite backup.
 2. Stop the service.
-3. Replace only the binary/package files. Never replace the SQLite database or token during a normal upgrade.
-4. Start the service. Versioned migrations run automatically before readiness becomes healthy.
-5. Verify readiness and outbox health before considering the upgrade complete.
+3. Verify the incoming artifact checksum against `SHA256SUMS.txt` and retain `RELEASE-MANIFEST.txt` for the deployed version.
+4. Replace only the binary/package files. Never replace the SQLite database or token during a normal upgrade.
+5. Start the service. Versioned migrations run automatically before readiness becomes healthy.
+6. Verify readiness and outbox health before considering the upgrade complete.
 
 If startup or migration validation fails, stop the new binary and restore the previous binary. Restore the database only when there is evidence the database itself was damaged; follow `docs/RECOVERY.md`.
 
