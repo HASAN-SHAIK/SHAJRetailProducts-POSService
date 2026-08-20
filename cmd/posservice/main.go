@@ -29,7 +29,13 @@ import (
     "github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/syncengine"
 )
 
+var (
+    version = "dev"
+    gitCommit = "unknown"
+)
+
 func main() {
+    slog.Info("SHAJRetail POS build", "version", version, "git_commit", gitCommit)
     cfg, err := config.Load(); if err != nil { slog.Error("invalid configuration", "error", err); os.Exit(1) }
     startupCtx, cancelStartup := context.WithTimeout(context.Background(), 30*time.Second); defer cancelStartup()
     db, err := database.Open(startupCtx, cfg.DatabasePath); if err != nil { slog.Error("open local database", "error", err); os.Exit(1) }; defer db.Close()
