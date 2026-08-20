@@ -55,6 +55,8 @@ jobs:
   frontend-full:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    env:
+      REACT_APP_POS_LOCAL_API_ENABLED: 'true'
     steps:
       - uses: actions/checkout@v4
         with:
