@@ -1,0 +1,91 @@
+name: V1 Full release acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'docs/V1_RELEASE_ACCEPTANCE_MATRIX.md'
+      - 'docs/V1-TRANSACTION-ACCEPTANCE-MATRIX.md'
+      - '.github/workflows/v1-full-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pos-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: Test all POS packages
+        run: go test ./...
+      - name: Vet POS service
+        run: go vet ./...
+      - name: Build packaged POS runtime
+        run: go build ./cmd/posservice
+      - name: Verify release artifact provenance
+        run: bash scripts/v1-deployment-provenance-acceptance.sh
+
+  backend-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Backend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install Backend from committed lockfile
+        run: npm ci
+      - name: Run complete Backend test suite
+        run: npm test -- --runInBand
+      - name: Build Backend production container
+        run: docker build --pull -t shajretail-backend:v1-final .
+
+  frontend-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Frontend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install Frontend from committed lockfile
+        run: npm ci
+      - name: Run complete Frontend test suite
+        env:
+          CI: 'true'
+        run: npm test -- --watchAll=false
+      - name: Build production Frontend
+        run: CI=false npm run build
+      - name: Build production Frontend container
+        run: docker build --pull -t shajretail-frontend:v1-final .
+      - name: Verify production SPA fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          cid="$(docker run -d -p 127.0.0.1:8080:80 shajretail-frontend:v1-final)"
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/ -o /tmp/root.html; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8080/v1/final/deep/link -o /tmp/fallback.html
+          test -s /tmp/root.html
+          cmp /tmp/root.html /tmp/fallback.html
