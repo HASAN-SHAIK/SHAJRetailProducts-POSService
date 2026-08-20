@@ -41,6 +41,29 @@ func TestWindowsInstallerLoadsPOSServiceEnvironment(t *testing.T) {
 	}
 }
 
+func TestWindowsInstallerRequiresCompleteProductionSecurityConfig(t *testing.T) {
+	script := readWindowsInstaller(t)
+	for _, want := range []string{
+		`POS_ENVIRONMENT=production`,
+		`POS_OFFLINE_GRANT_PUBLIC_KEY=`,
+		`POS_CENTRAL_API_URL=`,
+		`POS_SYNC_TENANT_ID=`,
+		`POS_SYNC_TOKEN=`,
+		`POS_ENVIRONMENT=production is required`,
+		`Configure POS_OFFLINE_GRANT_PUBLIC_KEY`,
+		`Configure POS_CENTRAL_API_URL, POS_SYNC_TENANT_ID and POS_SYNC_TOKEN together`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("Windows installer must enforce production configuration %q", want)
+		}
+	}
+	validationIndex := strings.Index(script, `Configure POS_OFFLINE_GRANT_PUBLIC_KEY`)
+	serviceCreateIndex := strings.Index(script, `sc.exe create $ServiceName`)
+	if validationIndex < 0 || serviceCreateIndex < 0 || validationIndex > serviceCreateIndex {
+		t.Fatal("production configuration must be validated before service creation/start")
+	}
+}
+
 func TestWindowsInstallerPreservesDurablePOSStateOnReinstall(t *testing.T) {
 	script := readWindowsInstaller(t)
 
