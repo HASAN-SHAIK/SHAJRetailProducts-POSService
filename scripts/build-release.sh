@@ -3,6 +3,17 @@ set -euo pipefail
 
 VERSION="${VERSION:-dev}"
 OUT="${OUT:-dist}"
+GIT_COMMIT="${GIT_COMMIT:-$(git rev-parse --verify HEAD 2>/dev/null || true)}"
+
+if [[ -z "$VERSION" ]]; then
+  echo "VERSION must not be empty" >&2
+  exit 2
+fi
+if [[ ! "$GIT_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+  echo "GIT_COMMIT must be an exact 40-character Git commit SHA" >&2
+  exit 2
+fi
+
 mkdir -p "$OUT"
 
 build() {
@@ -24,4 +35,12 @@ case "${1:-all}" in
   *) echo "usage: $0 [linux|windows|darwin|all]" >&2; exit 2 ;;
 esac
 
-( cd "$OUT" && sha256sum shajretail-pos-* > SHA256SUMS.txt )
+(
+  cd "$OUT"
+  sha256sum shajretail-pos-* > SHA256SUMS.txt
+  cat > RELEASE-MANIFEST.txt <<EOF
+version=${VERSION}
+git_commit=${GIT_COMMIT}
+checksums=SHA256SUMS.txt
+EOF
+)
