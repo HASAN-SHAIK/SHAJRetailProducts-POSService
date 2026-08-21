@@ -46,7 +46,10 @@ func TestManagerApprovedRefundConsumesApprovalAndSurvivesRestart(t *testing.T) {
 	res := httptest.NewRecorder()
 	s.handleOrderRefund(res, req)
 	if res.Code != http.StatusOK { db.Close(); t.Fatalf("approved refund status=%d body=%s", res.Code, res.Body.String()) }
-	if !strings.Contains(res.Body.String(), `"refunded_by_user_id":"manager-1"`) { db.Close(); t.Fatalf("approved refund lost manager identity body=%s", res.Body.String()) }
+	if !strings.Contains(res.Body.String(), `"refunded_by_user_id":"cashier-1"`) || !strings.Contains(res.Body.String(), `"approved_by_user_id":"manager-1"`) {
+		db.Close()
+		t.Fatalf("approved refund lost distinct initiator/approver identity body=%s", res.Body.String())
+	}
 	if _, err := s.consumeManagerApprovalForRefundAction(ctx, token, "cashier-1", "ord-refund-approved-restart", approvalActionRefundFull); err == nil { db.Close(); t.Fatal("successful refund left one-time approval reusable before restart") }
 	if err := db.Close(); err != nil { t.Fatal(err) }
 
