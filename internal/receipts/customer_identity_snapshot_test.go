@@ -2,6 +2,7 @@ package receipts
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
@@ -81,10 +82,6 @@ func TestOfflineCustomerIdentityIsFrozenInReceiptAndSaleCompletedOutbox(t *testi
 	order.CompletedByUserID = stringPtr("cashier-central-2")
 
 	receiptService := New(db)
-	if err := db.WithTx(ctx, func(tx interfaceTx) error { return nil }); err != nil {
-		t.Fatal(err)
-	}
-
 	if err := db.WithTx(ctx, func(tx *sql.Tx) error {
 		return receiptService.ApplyCompletionTx(ctx, tx, order)
 	}); err != nil {
