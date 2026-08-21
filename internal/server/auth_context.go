@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/localauth"
+	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/orders"
 )
 
 type authContextKey struct{}
@@ -56,7 +57,8 @@ func (s *Server) localAuthMiddleware(next http.Handler) http.Handler {
 		if r.URL.Path == "/api/v1/health" || r.URL.Path == "/api/v1/ready" { next.ServeHTTP(w, r); return }
 		if strings.TrimSpace(r.Header.Get("X-POS-Local-Token")) == "" {
 			internal := LocalUserContext{UserID: "internal-test", Role: "admin", TenantID: "internal-test", AllBranchAccess: true, Permissions: []string{"*"}}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authContextKey{}, internal)))
+			ctx := context.WithValue(r.Context(), authContextKey{}, internal)
+			next.ServeHTTP(w, r.WithContext(orders.WithCreatorUserID(ctx, internal.UserID)))
 			return
 		}
 		machineOnly := r.URL.Path == "/api/v1/auth/enroll" ||
@@ -71,7 +73,8 @@ func (s *Server) localAuthMiddleware(next http.Handler) http.Handler {
 		user, err := s.localAuth.Authenticate(r.Context(), token)
 		if err != nil { writeError(w, http.StatusUnauthorized, "local_session_required"); return }
 		ctxUser := LocalUserContext{UserID: user.UserID, Role: user.Role, TenantID: user.TenantID, BranchID: user.BranchID, AllBranchAccess: user.AllBranchAccess, Permissions: user.Permissions}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authContextKey{}, ctxUser)))
+		ctx := context.WithValue(r.Context(), authContextKey{}, ctxUser)
+		next.ServeHTTP(w, r.WithContext(orders.WithCreatorUserID(ctx, user.UserID)))
 	})
 }
 
