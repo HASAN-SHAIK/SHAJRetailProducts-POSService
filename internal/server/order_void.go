@@ -49,12 +49,12 @@ func (s *Server) handleOrderVoid(w http.ResponseWriter, r *http.Request) {
 		reason = strings.TrimSpace(approval.Reason)
 	}
 
-	if approverUserID == "" || reason == "" {
+	if strings.TrimSpace(user.UserID) == "" || approverUserID == "" || reason == "" {
 		writeError(w, http.StatusBadRequest, "void_reason_required")
 		return
 	}
 
-	order, err := s.orders.VoidWith(r.Context(), orderID, approverUserID, reason)
+	order, err := s.orders.VoidWithActors(r.Context(), orderID, user.UserID, approverUserID, reason)
 	switch {
 	case errors.Is(err, orders.ErrNotFound):
 		writeError(w, http.StatusNotFound, "order_not_found")
@@ -81,7 +81,8 @@ func (s *Server) handleOrderVoid(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"order": order,
-		"voided_by_user_id": approverUserID,
+		"voided_by_user_id": user.UserID,
+		"approved_by_user_id": approverUserID,
 		"reason": reason,
 	})
 }
