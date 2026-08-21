@@ -1,6 +1,6 @@
 # RetailHub Dashboard Migration Matrix
 
-Status: IN PROGRESS — runtime migration complete; dead-code cleanup and final cross-repository release certification pending.
+Status: FINAL RELEASE VALIDATION IN PROGRESS
 
 ## Goal
 
@@ -27,8 +27,8 @@ Architecture boundary:
 | Branch / location performance | Central `/dashboard/location-performance` | CustomerHub #7 | CERTIFIED |
 | Smart Insights | Central `/dashboard/smart-insights` governed canonical facts | CustomerHub #8 | CERTIFIED |
 | POS management-dashboard runtime removal | Local POS operational authority only | Frontend #84 | CERTIFIED |
-| Retired POS management-dashboard source deletion | No runtime authority; cleanup only | Frontend #85 | UNDER VALIDATION |
-| Final cross-repository migration release gate | RetailHub + Frontend + Central/POS authority | pending | NOT RUN |
+| Retired POS management-dashboard source deletion | No runtime authority; cleanup only | Frontend #85 | CERTIFIED |
+| Final cross-repository migration release gate | RetailHub + Frontend + Central/POS authority | POSService final certification PR | UNDER VALIDATION |
 
 ## RetailHub target boundary
 
@@ -46,7 +46,9 @@ All migrated screens require explicit loading/error/retry/empty/data behavior an
 
 ## Final POS dashboard boundary
 
-The routed POS `/dashboard` is now the POS Operational Dashboard. It may expose only store-runtime concerns such as:
+The routed POS `/dashboard` is now the POS Operational Dashboard. The previous `DashboardOverview` management component and its styles have been removed after the replacement passed the complete Frontend Jest/build gate.
+
+The POS dashboard may expose only store-runtime concerns such as:
 
 | Operational family | Authority | Decision |
 | --- | --- | --- |
@@ -59,7 +61,16 @@ The routed POS `/dashboard` is now the POS Operational Dashboard. It may expose 
 | Immediate local inventory availability needed to sell | Local SQLite/POSService | KEEP outside management analytics |
 | Revenue/profit/growth/inventory-management/category/customer/branch/smart analytics | Central/RetailHub | REMOVED FROM POS |
 
-Frontend #84 replaced the old `DashboardOverview` route with `POSOperationalDashboard`, removed the Central management-dashboard network/retry contract from POS, and certified explicit local POS-unavailable + Refresh POS behavior. Its exact head passed both the focused Frontend completion gate and the complete Frontend Jest/build suite before merge.
+Frontend #84 replaced the old route with `POSOperationalDashboard` and certified explicit local POS-unavailable + Refresh POS behavior. Frontend #85 then deleted the unreachable management-dashboard source and styles after the full Frontend suite and production build passed.
+
+## Final release gate
+
+`.github/workflows/retailhub-dashboard-migration-release.yml` validates current merged repository state across four boundaries:
+
+- POS: all Go packages, `go vet`, and packaged POS runtime build;
+- Central Backend: canonical reporting authority acceptance covering tenant isolation, historical sales, branch inventory, daily sales, customer outstanding, GST/category facts, trusted report scope and bounded date ranges;
+- POS Frontend: explicit RetailHub migration boundary tests plus production build;
+- RetailHub/CustomerHub: dashboard migration acceptance plus production build.
 
 ## Acceptance rules
 
@@ -73,9 +84,9 @@ The migration is release-ready only when all of the following are true:
 - Returns/refunds/offline sales affect metrics only after canonical Central convergence under existing V1 rules.
 - Duplicate/replay behavior cannot double-count canonical reporting facts.
 - RetailHub production dashboard acceptance and build are green.
-- POS complete Frontend suite/build is green after management dashboard removal.
-- Retired management-dashboard code is removed or proven unreachable.
-- A final cross-repository gate validates current merged CustomerHub, Frontend, Backend/POS reporting authority and the POS operational boundary.
+- POS Frontend migration acceptance and production build are green.
+- Retired management-dashboard code is removed.
+- The final cross-repository release gate is green on the exact certification head.
 
 ## Completion criteria
 
@@ -83,6 +94,6 @@ This migration is complete only when:
 
 1. every business-management metric formerly rendered by POS is present and certified in RetailHub or explicitly N/A;
 2. RetailHub consumes Central canonical reporting authority;
-3. POS no longer renders management analytics or retains reachable management-dashboard code;
+3. POS no longer renders management analytics or retains management-dashboard code;
 4. POS retains only edge-operational dashboard information;
 5. the final cross-repository RetailHub dashboard migration release gate is green.
