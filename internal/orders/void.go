@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	ErrAlreadyVoided          = errors.New("order already voided")
-	ErrRefundRequired         = errors.New("completed order requires refund")
+	ErrAlreadyVoided           = errors.New("order already voided")
+	ErrRefundRequired          = errors.New("completed order requires refund")
 	ErrPaymentReversalRequired = errors.New("captured payment requires reversal")
 )
 
@@ -18,11 +18,17 @@ var (
 // invariants that may be added later without weakening the order transition.
 type VoidHook func(context.Context, *sql.Tx, Order) error
 
-// VoidWith cancels an order only before sale completion and only when no net
-// captured money remains. Completed or paid sales deliberately require the
-// refund/reversal workflow because inventory, payment and receipt facts may
-// already be durable.
+// VoidWith preserves the legacy single-actor contract by treating the
+// approving user as the initiating user. New request paths should call
+// VoidWithActors so operator and manager approver remain distinct.
 func (s *Service) VoidWith(ctx context.Context, id, approvedByUserID, reason string, hooks ...VoidHook) (Order, error) {
+	return s.VoidWithActors(ctx, id, approvedByUserID, approvedByUserID, reason, hooks...)
+}
+
+// VoidWithActors cancels an order only before sale completion and only when no
+// net captured money remains, while durably preserving both the initiating
+// operator and the approving manager in the same SQLite transaction.
+func (s *Service) VoidWithActors(ctx context.Context, id, voidedByUserID, approvedByUserID, reason string, hooks ...VoidHook) (Order, error) {
 	order, err := s.Get(ctx, id)
 	if err != nil {
 		return Order{}, err
@@ -34,9 +40,10 @@ func (s *Service) VoidWith(ctx context.Context, id, approvedByUserID, reason str
 		return Order{}, ErrRefundRequired
 	}
 
+	voidedByUserID = strings.TrimSpace(voidedByUserID)
 	approvedByUserID = strings.TrimSpace(approvedByUserID)
 	reason = strings.TrimSpace(reason)
-	if approvedByUserID == "" || reason == "" {
+	if voidedByUserID == "" || approvedByUserID == "" || reason == "" {
 		return Order{}, ErrInvalidOrder
 	}
 
@@ -72,9 +79,9 @@ func (s *Service) VoidWith(ctx context.Context, id, approvedByUserID, reason str
 		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE sales_orders
-			SET status='cancelled', version=?, updated_at=?, approved_by_user_id=?, approval_reason=?
+			SET status='cancelled', version=?, updated_at=?, voided_by_user_id=?, approved_by_user_id=?, approval_reason=?
 			WHERE id=?`,
-			order.Version, now, approvedByUserID, reason, id,
+			order.Version, now, voidedByUserID, approvedByUserID, reason, id,
 		); err != nil {
 			return err
 		}
