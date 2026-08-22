@@ -14,6 +14,7 @@ type SaleReturnedPayload struct {
 	Order            orders.Order    `json:"order"`
 	Inventory        json.RawMessage `json:"inventory_movements"`
 	Payments         json.RawMessage `json:"payments"`
+	RefundedByUserID string          `json:"refunded_by_user_id"`
 	ApprovedByUserID string          `json:"approved_by_user_id"`
 	ApprovalReason   string          `json:"approval_reason"`
 }
@@ -29,21 +30,21 @@ type SalePartialReturnedPayload struct {
 	Order            orders.Order              `json:"order"`
 	RefundMinor      int64                     `json:"refund_minor"`
 	Lines            []SalePartialReturnedLine `json:"lines"`
+	RefundedByUserID string                    `json:"refunded_by_user_id"`
 	ApprovedByUserID string                    `json:"approved_by_user_id"`
 	ApprovalReason   string                    `json:"approval_reason"`
 	ReturnedAt       string                    `json:"returned_at"`
 }
 
-// ApplySalePartialReturnedTx appends one item-level return operation in the same
-// transaction as its ledger, tender reversal, stock restoration, and order audit.
-// A final operation still emits this item-level fact before sale.returned so Central
-// receives the last quantities/refund allocation as well as the terminal lifecycle.
+// ApplySalePartialReturnedTx preserves the legacy single-actor contract.
 func (s *Service) ApplySalePartialReturnedTx(ctx context.Context, tx *sql.Tx, order orders.Order, returnID string, refundMinor int64, lines []SalePartialReturnedLine, approvedByUserID, reason string) error {
+	return s.ApplySalePartialReturnedActorsTx(ctx, tx, order, returnID, refundMinor, lines, approvedByUserID, approvedByUserID, reason)
+}
+
+// ApplySalePartialReturnedActorsTx appends one item-level return operation while
+// preserving initiating cashier/operator and approving manager independently.
+func (s *Service) ApplySalePartialReturnedActorsTx(ctx context.Context, tx *sql.Tx, order orders.Order, returnID string, refundMinor int64, lines []SalePartialReturnedLine, refundedByUserID, approvedByUserID, reason string) error {
 	eventOrder := order
-	// POS payment state may become paid/partially_paid as tender reversals are
-	// applied. Central models the sale lifecycle separately: an item-level return
-	// remains a completed sale until the final remaining quantity is consumed.
-	// Canonicalize only the durable event vocabulary; keep the local DB state intact.
 	if eventOrder.Status != "returned" {
 		eventOrder.Status = "completed"
 	}
@@ -52,6 +53,7 @@ func (s *Service) ApplySalePartialReturnedTx(ctx context.Context, tx *sql.Tx, or
 		Order: eventOrder,
 		RefundMinor: refundMinor,
 		Lines: lines,
+		RefundedByUserID: refundedByUserID,
 		ApprovedByUserID: approvedByUserID,
 		ApprovalReason: reason,
 		ReturnedAt: eventOrder.UpdatedAt,
@@ -75,9 +77,14 @@ func (s *Service) ApplySalePartialReturnedTx(ctx context.Context, tx *sql.Tx, or
 	return err
 }
 
-// ApplySaleReturnedTx appends the final refund fact in the same transaction as
-// payment reversal, stock restoration, and the returned-order state change.
+// ApplySaleReturnedTx preserves the legacy single-actor contract.
 func (s *Service) ApplySaleReturnedTx(ctx context.Context, tx *sql.Tx, order orders.Order, approvedByUserID, reason string) error {
+	return s.ApplySaleReturnedActorsTx(ctx, tx, order, approvedByUserID, approvedByUserID, reason)
+}
+
+// ApplySaleReturnedActorsTx appends the final refund fact in the same transaction
+// as payment reversal, stock restoration, and the returned-order state change.
+func (s *Service) ApplySaleReturnedActorsTx(ctx context.Context, tx *sql.Tx, order orders.Order, refundedByUserID, approvedByUserID, reason string) error {
 	inventory, err := loadInventoryTx(ctx, tx, order.ID)
 	if err != nil { return err }
 	payments, err := loadPaymentsTx(ctx, tx, order.ID)
@@ -86,6 +93,7 @@ func (s *Service) ApplySaleReturnedTx(ctx context.Context, tx *sql.Tx, order ord
 		Order: order,
 		Inventory: inventory,
 		Payments: payments,
+		RefundedByUserID: refundedByUserID,
 		ApprovedByUserID: approvedByUserID,
 		ApprovalReason: reason,
 	})

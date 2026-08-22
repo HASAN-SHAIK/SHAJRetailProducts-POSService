@@ -54,6 +54,28 @@ func (s *Service) SetTaxPolicy(policy func(context.Context) (TaxPolicy, error)) 
 	s.taxPolicy = policy
 }
 
+type creatorContextKey struct{}
+
+// WithCreatorUserID attaches the authenticated Central user identity to the
+// service context. HTTP callers should derive this from the verified local POS
+// session; payload-supplied staff IDs must never be trusted as authority.
+func WithCreatorUserID(ctx context.Context, userID string) context.Context {
+	userID = strings.TrimSpace(userID)
+	if userID == "" || userID == "internal-test" {
+		return ctx
+	}
+	return context.WithValue(ctx, creatorContextKey{}, userID)
+}
+
+func creatorUserIDFromContext(ctx context.Context) *string {
+	userID, _ := ctx.Value(creatorContextKey{}).(string)
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil
+	}
+	return &userID
+}
+
 type CreateInput struct {
 	ClientOrderID string      `json:"client_order_id"`
 	StoreID       string      `json:"store_id"`
@@ -119,23 +141,25 @@ type ItemInput struct {
 }
 
 type Order struct {
-	ID            string  `json:"id"`
-	ClientOrderID string  `json:"client_order_id"`
-	StoreID       string  `json:"store_id"`
-	TerminalID    *string `json:"terminal_id,omitempty"`
-	CustomerID    *string `json:"customer_id,omitempty"`
-	Status        string  `json:"status"`
-	Currency      string  `json:"currency"`
-	SubtotalMinor int64   `json:"subtotal_minor"`
-	DiscountMinor int64   `json:"discount_minor"`
-	TaxMinor      int64   `json:"tax_minor"`
-	TotalMinor    int64   `json:"total_minor"`
-	Notes         *string `json:"notes,omitempty"`
-	Version       int     `json:"version"`
-	CompletedAt   *string `json:"completed_at,omitempty"`
-	CreatedAt     string  `json:"created_at"`
-	UpdatedAt     string  `json:"updated_at"`
-	Items         []Item  `json:"items"`
+	ID                string  `json:"id"`
+	ClientOrderID     string  `json:"client_order_id"`
+	StoreID           string  `json:"store_id"`
+	TerminalID        *string `json:"terminal_id,omitempty"`
+	CustomerID        *string `json:"customer_id,omitempty"`
+	CreatedByUserID   *string `json:"created_by_user_id,omitempty"`
+	CompletedByUserID *string `json:"completed_by_user_id,omitempty"`
+	Status            string  `json:"status"`
+	Currency          string  `json:"currency"`
+	SubtotalMinor     int64   `json:"subtotal_minor"`
+	DiscountMinor     int64   `json:"discount_minor"`
+	TaxMinor          int64   `json:"tax_minor"`
+	TotalMinor        int64   `json:"total_minor"`
+	Notes             *string `json:"notes,omitempty"`
+	Version           int     `json:"version"`
+	CompletedAt       *string `json:"completed_at,omitempty"`
+	CreatedAt         string  `json:"created_at"`
+	UpdatedAt         string  `json:"updated_at"`
+	Items             []Item  `json:"items"`
 }
 
 type Item struct {
@@ -303,16 +327,16 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 
 	order := Order{
 		ID: orderID, ClientOrderID: input.ClientOrderID, StoreID: input.StoreID, TerminalID: input.TerminalID,
-		CustomerID: customerID, Status: "confirmed", Currency: input.Currency, SubtotalMinor: subtotal,
+		CustomerID: customerID, CreatedByUserID: creatorUserIDFromContext(ctx), Status: "confirmed", Currency: input.Currency, SubtotalMinor: subtotal,
 		DiscountMinor: discount, TaxMinor: tax, TotalMinor: total, Notes: input.Notes, Version: 1,
 		CreatedAt: now, UpdatedAt: now, Items: built,
 	}
 
 	err := s.db.WithTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `
-            INSERT INTO sales_orders(id,client_order_id,store_id,terminal_id,customer_id,status,currency,subtotal_minor,discount_minor,tax_minor,total_minor,notes,source,version,created_at,updated_at)
-            VALUES(?,?,?,?,?,'confirmed',?,?,?,?,?,?,'pos',1,?,?)`,
-			order.ID, order.ClientOrderID, order.StoreID, order.TerminalID, order.CustomerID, order.Currency,
+            INSERT INTO sales_orders(id,client_order_id,store_id,terminal_id,customer_id,created_by_user_id,status,currency,subtotal_minor,discount_minor,tax_minor,total_minor,notes,source,version,created_at,updated_at)
+            VALUES(?,?,?,?,?,?,'confirmed',?,?,?,?,?,?,'pos',1,?,?)`,
+			order.ID, order.ClientOrderID, order.StoreID, order.TerminalID, order.CustomerID, order.CreatedByUserID, order.Currency,
 			order.SubtotalMinor, order.DiscountMinor, order.TaxMinor, order.TotalMinor, order.Notes, now, now,
 		); err != nil {
 			return err
@@ -418,10 +442,10 @@ func (s *Service) List(ctx context.Context, storeID, status string, limit, offse
 
 func (s *Service) getOne(ctx context.Context, where string, value any) (Order, error) {
 	row := s.db.SQL().QueryRowContext(ctx, `
-        SELECT id,client_order_id,store_id,terminal_id,customer_id,status,currency,subtotal_minor,discount_minor,tax_minor,total_minor,notes,version,completed_at,created_at,updated_at
+        SELECT id,client_order_id,store_id,terminal_id,customer_id,created_by_user_id,completed_by_user_id,status,currency,subtotal_minor,discount_minor,tax_minor,total_minor,notes,version,completed_at,created_at,updated_at
         FROM sales_orders `+where, value)
 	var o Order
-	if err := row.Scan(&o.ID, &o.ClientOrderID, &o.StoreID, &o.TerminalID, &o.CustomerID, &o.Status, &o.Currency, &o.SubtotalMinor, &o.DiscountMinor, &o.TaxMinor, &o.TotalMinor, &o.Notes, &o.Version, &o.CompletedAt, &o.CreatedAt, &o.UpdatedAt); err != nil {
+	if err := row.Scan(&o.ID, &o.ClientOrderID, &o.StoreID, &o.TerminalID, &o.CustomerID, &o.CreatedByUserID, &o.CompletedByUserID, &o.Status, &o.Currency, &o.SubtotalMinor, &o.DiscountMinor, &o.TaxMinor, &o.TotalMinor, &o.Notes, &o.Version, &o.CompletedAt, &o.CreatedAt, &o.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Order{}, ErrNotFound
 		}
