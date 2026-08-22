@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -16,7 +18,7 @@ type syncEventDiagnostics struct {
 	Outbox          []outboxEventDetails           `json:"outbox"`
 	Inbox           []inboxEventDetails            `json:"inbox"`
 	EffectiveConfig effectiveConfigSyncDiagnostics `json:"effective_config"`
-	LocalAuth       localAuthDiagnostics            `json:"local_auth"`
+	LocalAuth       localAuthDiagnostics           `json:"local_auth"`
 }
 
 type effectiveConfigSyncDiagnostics struct {
@@ -42,6 +44,8 @@ type outboxEventDetails struct {
 	LastError        string          `json:"last_error,omitempty"`
 	CreatedAt        string          `json:"created_at"`
 	PublishedAt      string          `json:"published_at,omitempty"`
+	StuckSince       string          `json:"stuck_since,omitempty"`
+	AgeSeconds       int64           `json:"age_seconds,omitempty"`
 	Payload          json.RawMessage `json:"payload"`
 	Metadata         json.RawMessage `json:"metadata"`
 }
@@ -56,7 +60,13 @@ type inboxEventDetails struct {
 	ReceivedAt    string          `json:"received_at"`
 	AppliedAt     string          `json:"applied_at,omitempty"`
 	LastError     string          `json:"last_error,omitempty"`
+	StuckSince    string          `json:"stuck_since,omitempty"`
+	AgeSeconds    int64           `json:"age_seconds,omitempty"`
 	Payload       json.RawMessage `json:"payload"`
+}
+
+type skipDiagnosticInput struct {
+	Reason string `json:"reason"`
 }
 
 func (s *Server) handleSyncEventDiagnostics(w http.ResponseWriter, r *http.Request) {
@@ -171,6 +181,7 @@ func (s *Server) loadOutboxDiagnostics(ctx context.Context, limit int) ([]outbox
 		item.LockOwner = nullableString(lockOwner)
 		item.LastError = nullableString(lastError)
 		item.PublishedAt = nullableString(publishedAt)
+		item.StuckSince, item.AgeSeconds = syncStuckEvidence(item.Status, item.CreatedAt, item.AvailableAt, item.LockedAt, item.PublishedAt)
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -216,6 +227,7 @@ func (s *Server) loadInboxDiagnostics(ctx context.Context, limit int) ([]inboxEv
 		item.Payload = rawJSON(payload)
 		item.AppliedAt = nullableString(appliedAt)
 		item.LastError = nullableString(lastError)
+		item.StuckSince, item.AgeSeconds = syncStuckEvidence(item.Status, item.ReceivedAt, "", "", item.AppliedAt)
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -237,4 +249,165 @@ func rawJSON(value string) json.RawMessage {
 	}
 	encoded, _ := json.Marshal(value)
 	return json.RawMessage(encoded)
+}
+
+func (s *Server) handleSkipOutboxDiagnostic(w http.ResponseWriter, r *http.Request) {
+	user, ok := localUserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "local_session_required")
+		return
+	}
+	if !canSkipSyncDiagnostic(user) {
+		writeError(w, http.StatusForbidden, "permission_denied")
+		return
+	}
+	input := readSkipDiagnosticInput(w, r)
+	eventID := strings.TrimSpace(r.PathValue("id"))
+	if eventID == "" {
+		writeError(w, http.StatusBadRequest, "outbox_event_id_required")
+		return
+	}
+	result, err := s.skipOutboxDiagnostic(r.Context(), eventID, user.UserID, input.Reason)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "outbox_event_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "outbox_skip_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleSkipInboxDiagnostic(w http.ResponseWriter, r *http.Request) {
+	user, ok := localUserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "local_session_required")
+		return
+	}
+	if !canSkipSyncDiagnostic(user) {
+		writeError(w, http.StatusForbidden, "permission_denied")
+		return
+	}
+	input := readSkipDiagnosticInput(w, r)
+	messageID := strings.TrimSpace(r.PathValue("id"))
+	if messageID == "" {
+		writeError(w, http.StatusBadRequest, "inbox_message_id_required")
+		return
+	}
+	result, err := s.skipInboxDiagnostic(r.Context(), messageID, user.UserID, input.Reason)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "inbox_message_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "inbox_skip_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func readSkipDiagnosticInput(w http.ResponseWriter, r *http.Request) skipDiagnosticInput {
+	if r.Body == nil {
+		return skipDiagnosticInput{}
+	}
+	var input skipDiagnosticInput
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<10))
+	_ = dec.Decode(&input)
+	input.Reason = strings.TrimSpace(input.Reason)
+	if input.Reason == "" {
+		input.Reason = "Skipped from Sync Center"
+	}
+	if len(input.Reason) > 240 {
+		input.Reason = input.Reason[:240]
+	}
+	return input
+}
+
+func canSkipSyncDiagnostic(user LocalUserContext) bool {
+	if hasLocalPermission(user, "*") || hasLocalPermission(user, "sync:skip") {
+		return true
+	}
+	role := strings.ToLower(strings.TrimSpace(user.Role))
+	return role == "admin" || role == "manager"
+}
+
+func (s *Server) skipOutboxDiagnostic(ctx context.Context, eventID, userID, reason string) (map[string]any, error) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	lastError := fmt.Sprintf("skipped_by_user:%s reason:%s", strings.TrimSpace(userID), strings.TrimSpace(reason))
+	res, err := s.db.SQL().ExecContext(ctx, `
+		UPDATE outbox_events
+		SET status='published',
+		    published_at=?,
+		    locked_at=NULL,
+		    lock_owner=NULL,
+		    last_error=?,
+		    metadata_json=json_set(metadata_json,'$.sync_skipped',json_object('skipped_at',?,'skipped_by',?,'reason',?))
+		WHERE id=? AND status IN ('pending','processing','failed','dead_letter')`,
+		now, truncateDiagnosticNote(lastError), now, strings.TrimSpace(userID), strings.TrimSpace(reason), eventID)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return map[string]any{"queue": "outbox", "id": eventID, "status": "published", "skipped": true, "skipped_at": now}, nil
+}
+
+func (s *Server) skipInboxDiagnostic(ctx context.Context, messageID, userID, reason string) (map[string]any, error) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	lastError := fmt.Sprintf("skipped_by_user:%s reason:%s", strings.TrimSpace(userID), strings.TrimSpace(reason))
+	res, err := s.db.SQL().ExecContext(ctx, `
+		UPDATE inbox_messages
+		SET status='applied',
+		    applied_at=?,
+		    last_error=?
+		WHERE message_id=? AND status IN ('received','processing','failed')`,
+		now, truncateDiagnosticNote(lastError), messageID)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return map[string]any{"queue": "inbox", "id": messageID, "status": "applied", "skipped": true, "skipped_at": now}, nil
+}
+
+func truncateDiagnosticNote(value string) string {
+	if len(value) <= 1000 {
+		return value
+	}
+	return value[:1000]
+}
+
+func syncStuckEvidence(status, createdAt, availableAt, lockedAt, completedAt string) (string, int64) {
+	if completedAt != "" {
+		return "", 0
+	}
+	candidate := createdAt
+	if status == "processing" && lockedAt != "" {
+		candidate = lockedAt
+	} else if availableAt != "" {
+		candidate = availableAt
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, candidate)
+	if err != nil {
+		parsed, err = time.Parse(time.RFC3339, candidate)
+	}
+	if err != nil {
+		return candidate, 0
+	}
+	age := time.Since(parsed).Seconds()
+	if age < 0 {
+		age = 0
+	}
+	return parsed.UTC().Format(time.RFC3339Nano), int64(age)
 }

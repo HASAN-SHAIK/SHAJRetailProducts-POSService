@@ -55,6 +55,8 @@ func New(cfg config.Config, db *database.DB, deviceService *device.Service, cata
 	mux.HandleFunc("POST /api/v1/auth/approvals", s.handleManagerApproval)
 	mux.HandleFunc("GET /api/v1/diagnostics", s.handleDiagnostics)
 	mux.HandleFunc("GET /api/v1/diagnostics/sync-events", s.handleSyncEventDiagnostics)
+	mux.HandleFunc("POST /api/v1/diagnostics/outbox/{id}/skip", s.handleSkipOutboxDiagnostic)
+	mux.HandleFunc("POST /api/v1/diagnostics/inbox/{id}/skip", s.handleSkipInboxDiagnostic)
 	mux.HandleFunc("GET /api/v1/device", s.handleGetDevice)
 	mux.HandleFunc("PUT /api/v1/device/registration", s.handleDeviceRegistration)
 	mux.HandleFunc("POST /api/v1/device/heartbeat", s.handleDeviceHeartbeat)
