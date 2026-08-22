@@ -1,0 +1,35 @@
+name: RetailHub management CustomerHub acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'docs/RETAILHUB_MANAGEMENT_MIGRATION_CERTIFICATION.md'
+      - '.github/workflows/retailhub-management-pos-release.yml'
+      - '.github/workflows/retailhub-management-backend-release.yml'
+      - '.github/workflows/retailhub-management-frontend-release.yml'
+      - '.github/workflows/retailhub-management-hub-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  retailhub-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-CustomerHub
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:dashboard
+      - run: npm run test:customers
+      - run: npm run test:staff
+      - run: npm run test:expenses
+      - run: npm run test:accounts
+      - run: npm run build
