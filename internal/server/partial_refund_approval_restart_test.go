@@ -75,9 +75,9 @@ func TestManagerApprovedPartialRefundConsumesApprovalAndSurvivesRestart(t *testi
 		db.Close()
 		t.Fatalf("approved partial refund status=%d body=%s", res.Code, res.Body.String())
 	}
-	if !strings.Contains(res.Body.String(), `"refunded_by_user_id":"manager-1"`) || !strings.Contains(res.Body.String(), `"return_id":"ret-partial-approved-restart"`) {
+	if !strings.Contains(res.Body.String(), `"refunded_by_user_id":"cashier-1"`) || !strings.Contains(res.Body.String(), `"approved_by_user_id":"manager-1"`) || !strings.Contains(res.Body.String(), `"return_id":"ret-partial-approved-restart"`) {
 		db.Close()
-		t.Fatalf("approved partial refund lost manager or operation identity body=%s", res.Body.String())
+		t.Fatalf("approved partial refund lost distinct initiator/approver or operation identity body=%s", res.Body.String())
 	}
 	if _, err := s.consumeManagerApprovalForRefundAction(ctx, token, "cashier-1", "ord-partial-approved-restart", approvalActionRefundPartial); err == nil {
 		db.Close()

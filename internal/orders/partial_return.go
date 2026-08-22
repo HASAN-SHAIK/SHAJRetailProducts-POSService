@@ -8,14 +8,19 @@ import (
 	"time"
 )
 
-// ApplyPartialReturnStateTx records the audit/version change for an item-level
-// return inside a caller-owned transaction. Partial operations keep the sale in
-// its completed lifecycle status; when the durable return history consumes the
-// entire remaining sale, the status advances to returned.
+// ApplyPartialReturnStateTx preserves the legacy single-actor contract.
 func (s *Service) ApplyPartialReturnStateTx(ctx context.Context, tx *sql.Tx, order Order, approvedByUserID, reason string, fullRemaining bool) (Order, error) {
+	return s.ApplyPartialReturnStateActorsTx(ctx, tx, order, approvedByUserID, approvedByUserID, reason, fullRemaining)
+}
+
+// ApplyPartialReturnStateActorsTx records the audit/version change for an
+// item-level return inside a caller-owned transaction while preserving the
+// initiating cashier/operator independently from the approving manager.
+func (s *Service) ApplyPartialReturnStateActorsTx(ctx context.Context, tx *sql.Tx, order Order, refundedByUserID, approvedByUserID, reason string, fullRemaining bool) (Order, error) {
+	refundedByUserID = strings.TrimSpace(refundedByUserID)
 	approvedByUserID = strings.TrimSpace(approvedByUserID)
 	reason = strings.TrimSpace(reason)
-	if order.ID == "" || approvedByUserID == "" || reason == "" {
+	if order.ID == "" || refundedByUserID == "" || approvedByUserID == "" || reason == "" {
 		return Order{}, ErrInvalidOrder
 	}
 
@@ -48,9 +53,9 @@ func (s *Service) ApplyPartialReturnStateTx(ctx context.Context, tx *sql.Tx, ord
 
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE sales_orders
-		SET status=?,version=?,updated_at=?,approved_by_user_id=?,approval_reason=?
+		SET status=?,version=?,updated_at=?,refunded_by_user_id=?,approved_by_user_id=?,approval_reason=?
 		WHERE id=?`,
-		order.Status, order.Version, now, approvedByUserID, reason, order.ID,
+		order.Status, order.Version, now, refundedByUserID, approvedByUserID, reason, order.ID,
 	); err != nil {
 		return Order{}, err
 	}

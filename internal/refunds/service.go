@@ -27,11 +27,17 @@ func New(db *database.DB, orderService *orders.Service, paymentService *payments
 	return &Service{db: db, orders: orderService, payments: paymentService, inventory: inventoryService, outbox: outbox.New(db)}
 }
 
-// RefundFullSale compensates every captured tender, restores sale-issued stock,
-// marks the completed order returned, records manager audit data, and appends a
-// durable sale.returned fact in one SQLite transaction.
+// RefundFullSale preserves the legacy single-actor contract.
 func (s *Service) RefundFullSale(ctx context.Context, orderID, approvedByUserID, reason string) (orders.Order, error) {
-	return s.orders.RefundWith(ctx, orderID, approvedByUserID, reason,
+	return s.RefundFullSaleWithActors(ctx, orderID, approvedByUserID, approvedByUserID, reason)
+}
+
+// RefundFullSaleWithActors compensates every captured tender, restores
+// sale-issued stock, marks the completed order returned, and emits a durable
+// sale.returned fact while preserving refund initiator and manager approver as
+// distinct identities inside one SQLite transaction.
+func (s *Service) RefundFullSaleWithActors(ctx context.Context, orderID, refundedByUserID, approvedByUserID, reason string) (orders.Order, error) {
+	return s.orders.RefundWithActors(ctx, orderID, refundedByUserID, approvedByUserID, reason,
 		func(ctx context.Context, tx *sql.Tx, order orders.Order, paidMinor int64) error {
 			var reversalCount int
 			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM payments WHERE order_id=? AND direction='out' AND status IN ('captured','refunded')`, order.ID).Scan(&reversalCount); err != nil {
@@ -71,7 +77,7 @@ func (s *Service) RefundFullSale(ctx context.Context, orderID, approvedByUserID,
 			return s.inventory.ApplySaleReturnTx(ctx, tx, order)
 		},
 		func(ctx context.Context, tx *sql.Tx, order orders.Order, _ int64) error {
-			return s.outbox.ApplySaleReturnedTx(ctx, tx, order, approvedByUserID, reason)
+			return s.outbox.ApplySaleReturnedActorsTx(ctx, tx, order, refundedByUserID, approvedByUserID, reason)
 		},
 	)
 }

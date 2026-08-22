@@ -61,9 +61,9 @@ func TestManagerApprovedVoidConsumesApprovalAndSurvivesRestart(t *testing.T) {
 		db.Close()
 		t.Fatalf("approved void status=%d body=%s", res.Code, res.Body.String())
 	}
-	if !strings.Contains(res.Body.String(), `"voided_by_user_id":"manager-1"`) {
+	if !strings.Contains(res.Body.String(), `"voided_by_user_id":"cashier-1"`) || !strings.Contains(res.Body.String(), `"approved_by_user_id":"manager-1"`) {
 		db.Close()
-		t.Fatalf("approved void lost manager identity body=%s", res.Body.String())
+		t.Fatalf("approved void lost distinct initiator/approver identity body=%s", res.Body.String())
 	}
 
 	if _, err := s.consumeManagerApproval(ctx, token, "cashier-1", permissionPOSVoid); err == nil {

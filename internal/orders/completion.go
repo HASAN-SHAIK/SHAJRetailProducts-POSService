@@ -22,6 +22,7 @@ func (s *Service) CompleteWith(ctx context.Context, id string, hooks ...Completi
 
     now := time.Now().UTC().Format(time.RFC3339Nano)
     order.CompletedAt = &now
+    order.CompletedByUserID = creatorUserIDFromContext(ctx)
     order.UpdatedAt = now
     order.Version++
     if order.Status == "draft" {
@@ -38,8 +39,8 @@ func (s *Service) CompleteWith(ctx context.Context, id string, hooks ...Completi
             }
         }
         if _, err := tx.ExecContext(ctx,
-            `UPDATE sales_orders SET completed_at=?, updated_at=?, version=? WHERE id=?`,
-            now, now, order.Version, id,
+            `UPDATE sales_orders SET completed_at=?, completed_by_user_id=COALESCE(?, completed_by_user_id), updated_at=?, version=? WHERE id=?`,
+            now, order.CompletedByUserID, now, order.Version, id,
         ); err != nil {
             return err
         }

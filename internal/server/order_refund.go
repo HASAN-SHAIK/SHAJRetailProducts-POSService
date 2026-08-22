@@ -84,7 +84,7 @@ func (s *Server) handleOrderRefund(w http.ResponseWriter, r *http.Request) {
 		reason = strings.TrimSpace(approval.Reason)
 	}
 
-	if approverUserID == "" || reason == "" {
+	if strings.TrimSpace(user.UserID) == "" || approverUserID == "" || reason == "" {
 		writeError(w, http.StatusBadRequest, "refund_reason_required")
 		return
 	}
@@ -94,6 +94,7 @@ func (s *Server) handleOrderRefund(w http.ResponseWriter, r *http.Request) {
 		order, plan, err := refundService.ReturnPartial(r.Context(), refunds.PartialReturnInput{
 			ReturnID: input.ReturnID,
 			OrderID: orderID,
+			InitiatedByUserID: user.UserID,
 			ApprovedByUserID: approverUserID,
 			Reason: reason,
 			Lines: partialLines,
@@ -123,13 +124,14 @@ func (s *Server) handleOrderRefund(w http.ResponseWriter, r *http.Request) {
 			"order": order,
 			"return_id": input.ReturnID,
 			"plan": plan,
-			"refunded_by_user_id": approverUserID,
+			"refunded_by_user_id": user.UserID,
+			"approved_by_user_id": approverUserID,
 			"reason": reason,
 		})
 		return
 	}
 
-	order, err := refundService.RefundFullSale(r.Context(), orderID, approverUserID, reason)
+	order, err := refundService.RefundFullSaleWithActors(r.Context(), orderID, user.UserID, approverUserID, reason)
 	switch {
 	case errors.Is(err, orders.ErrNotFound):
 		writeError(w, http.StatusNotFound, "order_not_found")
@@ -153,7 +155,8 @@ func (s *Server) handleOrderRefund(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"order": order,
-		"refunded_by_user_id": approverUserID,
+		"refunded_by_user_id": user.UserID,
+		"approved_by_user_id": approverUserID,
 		"reason": reason,
 	})
 }
