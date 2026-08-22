@@ -1,0 +1,22 @@
+name: RetailHub management Backend build
+
+on:
+  pull_request:
+    paths:
+      - 'docs/RETAILHUB_MANAGEMENT_MIGRATION_CERTIFICATION.md'
+      - '.github/workflows/retailhub-management-*.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Backend
+          ref: main
+      - run: docker build -t shajretail-backend:retailhub-management-cert .
