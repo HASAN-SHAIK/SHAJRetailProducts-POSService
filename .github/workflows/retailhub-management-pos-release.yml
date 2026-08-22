@@ -1,0 +1,27 @@
+name: RetailHub management POS edge acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'docs/RETAILHUB_MANAGEMENT_MIGRATION_CERTIFICATION.md'
+      - '.github/workflows/retailhub-management-pos-release.yml'
+      - '.github/workflows/retailhub-management-backend-release.yml'
+      - '.github/workflows/retailhub-management-frontend-release.yml'
+      - '.github/workflows/retailhub-management-hub-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pos-edge-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - run: go test ./...
+      - run: go vet ./...
+      - run: go build ./cmd/posservice
