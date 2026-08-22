@@ -28,13 +28,19 @@ POS SHALL retain:
 - Sync Center, outbox/dead-letter diagnostics, connectivity/device health;
 - the fail-closed opening-completion gate, with management performed in RetailHub.
 
+## Security disposition
+
+The final certification exposed a fail-closed Backend security-inventory drift caused by the canonical reporting status fragments introduced after the previous management baseline. Backend PR #139 explicitly certified `reportableSaleStatusSql` and `completedSaleStatusSql` as fixed source-owned tuples, pinned their exact values in Security acceptance, and restored the complete Backend suite without relaxing request-interpolation or caller-controlled identifier protections.
+
 ## Release acceptance
 
-Release certification requires all jobs in `.github/workflows/retailhub-management-migration-release.yml` to pass against merged `main` of the four repositories:
+Release certification requires the exact-head cross-repository workflows on this PR to pass against merged `main` of all four repositories:
 
-1. POSService complete Go test/vet/build.
-2. Backend complete Jest suite to revalidate canonical authority, tenant isolation and management APIs.
-3. Frontend focused RetailHub-retirement acceptance plus production build.
-4. RetailHub dashboard/customers/staff/expenses/accounts migration acceptance plus production build.
+1. `RetailHub management POS edge acceptance` — complete POSService Go test/vet/build.
+2. `RetailHub management Backend tests` — complete Backend Jest suite.
+3. `RetailHub management Backend build` — Backend production container build.
+4. `RetailHub management Frontend acceptance` — complete Frontend Jest suite plus production build.
+5. `RetailHub management CustomerHub acceptance` — dashboard/customers/staff/expenses/accounts migration acceptance plus production build.
+6. Normal `POS integration` remains green on the certification head.
 
 The certification is invalid if any migrated management domain regains POS-local canonical authority or if the preserved offline/store execution boundaries regress.
