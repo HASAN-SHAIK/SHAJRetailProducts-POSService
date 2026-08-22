@@ -1,0 +1,96 @@
+name: RetailHub dashboard migration release acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'docs/RETAILHUB_DASHBOARD_MIGRATION_MATRIX.md'
+      - '.github/workflows/retailhub-dashboard-migration-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pos-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: Test POS packages
+        run: go test ./...
+      - name: Vet POS service
+        run: go vet ./...
+      - name: Build packaged POS runtime
+        run: go build ./cmd/posservice
+
+  backend-reporting-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Backend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Backend dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Run canonical reporting authority acceptance
+        run: >-
+          npx jest
+          src/controllers/reportController.v1ReportingAcceptance.test.js
+          src/controllers/reportController.v1TenantIsolation.test.js
+          src/controllers/historicalSalesReportController.v1ReportingAcceptance.test.js
+          src/controllers/branchInventoryReportController.v1ReportingAcceptance.test.js
+          src/controllers/dailySalesReportController.v1ReportingAcceptance.test.js
+          src/controllers/customerOutstandingReportController.v1ReportingAcceptance.test.js
+          src/controllers/canonicalGstReportController.v1ReportingAcceptance.test.js
+          src/controllers/tenant/categoryPerformanceV1Controller.v1ReportingAcceptance.test.js
+          src/middleware/dashboardReportScope.v1ReportingAcceptance.test.js
+          src/middleware/requireReportDateRange.v1ReportingAcceptance.test.js
+          --runInBand
+
+  frontend-pos-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Frontend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Verify POS operational dashboard boundary
+        run: >-
+          CI=true npm test -- --watchAll=false
+          src/pages/Dashboard.retailHubMigration.test.js
+          src/pages/dashboardNetworkState.v1.test.js
+      - name: Build merged production Frontend
+        run: CI=false npm run build
+
+  retailhub-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-CustomerHub
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Run RetailHub dashboard migration acceptance
+        run: npm run test:dashboard
+      - name: Build merged RetailHub
+        run: npm run build
