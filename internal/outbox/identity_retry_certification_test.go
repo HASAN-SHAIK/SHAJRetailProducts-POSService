@@ -50,8 +50,8 @@ func TestIdentityPayloadSurvivesLostAckRetryWithoutMutation(t *testing.T) {
 	if err != nil || first == nil {
 		t.Fatalf("first claim event=%v err=%v", first, err)
 	}
-	firstPayload := first.PayloadJSON
-	firstMetadata := first.MetadataJSON
+	firstPayload := append([]byte(nil), first.Payload...)
+	firstMetadata := append([]byte(nil), first.Metadata...)
 
 	// Model a publish where Central may have committed but the POS never received
 	// the acknowledgement. The POS must retry the same durable event identity and
@@ -74,15 +74,15 @@ func TestIdentityPayloadSurvivesLostAckRetryWithoutMutation(t *testing.T) {
 	if second.AggregateID != first.AggregateID || second.AggregateVersion != first.AggregateVersion {
 		t.Fatalf("retry changed aggregate identity/version: first=%s/%d second=%s/%d", first.AggregateID, first.AggregateVersion, second.AggregateID, second.AggregateVersion)
 	}
-	if second.PayloadJSON != firstPayload {
-		t.Fatalf("retry mutated identity payload\nfirst=%s\nsecond=%s", firstPayload, second.PayloadJSON)
+	if string(second.Payload) != string(firstPayload) {
+		t.Fatalf("retry mutated identity payload\nfirst=%s\nsecond=%s", firstPayload, second.Payload)
 	}
-	if second.MetadataJSON != firstMetadata {
-		t.Fatalf("retry mutated identity metadata\nfirst=%s\nsecond=%s", firstMetadata, second.MetadataJSON)
+	if string(second.Metadata) != string(firstMetadata) {
+		t.Fatalf("retry mutated identity metadata\nfirst=%s\nsecond=%s", firstMetadata, second.Metadata)
 	}
 
 	var decoded map[string]any
-	if err := json.Unmarshal([]byte(second.PayloadJSON), &decoded); err != nil {
+	if err := json.Unmarshal(second.Payload, &decoded); err != nil {
 		t.Fatal(err)
 	}
 	order := decoded["order"].(map[string]any)
