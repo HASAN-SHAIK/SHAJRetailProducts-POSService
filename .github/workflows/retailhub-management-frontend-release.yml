@@ -4,10 +4,7 @@ on:
   pull_request:
     paths:
       - 'docs/RETAILHUB_MANAGEMENT_MIGRATION_CERTIFICATION.md'
-      - '.github/workflows/retailhub-management-pos-release.yml'
-      - '.github/workflows/retailhub-management-backend-release.yml'
-      - '.github/workflows/retailhub-management-frontend-release.yml'
-      - '.github/workflows/retailhub-management-hub-release.yml'
+      - '.github/workflows/retailhub-management-*.yml'
   workflow_dispatch:
 
 permissions:
