@@ -1,0 +1,102 @@
+name: RetailHub management migration release acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'docs/RETAILHUB_MANAGEMENT_MIGRATION_CERTIFICATION.md'
+      - '.github/workflows/retailhub-management-migration-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pos-edge-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: Test POS packages
+        run: go test ./...
+      - name: Vet POS service
+        run: go vet ./...
+      - name: Build packaged POS runtime
+        run: go build ./cmd/posservice
+
+  backend-central-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
+      NODE_ENV: test
+      APP_ENVIRONMENT: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Backend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install Backend dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run complete canonical Backend suite
+        run: npm test -- --runInBand
+
+  frontend-pos-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      REACT_APP_POS_LOCAL_API_ENABLED: 'true'
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Frontend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Verify POS execution and RetailHub retirement boundaries
+        run: >-
+          npm test -- --watchAll=false
+          src/pages/Dashboard.retailHubMigration.test.js
+          src/pages/customers/CustomerOfflinePos.v1Acceptance.test.js
+          src/posStaffRetirement.v1.test.js
+          src/pages/staffExpenses/expenseRetailHubRetirement.v1.test.js
+          src/pages/accounts/accountsRetailHubRetirement.v1.test.js
+          src/posOpeningSetupRetirement.v1.test.js
+          src/retailHubNavigationRetirement.v1.test.js
+      - name: Build merged production Frontend
+        env:
+          CI: 'false'
+        run: npm run build
+
+  retailhub-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-CustomerHub
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Verify migrated RetailHub domains
+        run: |
+          npm run test:dashboard
+          npm run test:customers
+          npm run test:staff
+          npm run test:expenses
+          npm run test:accounts
+      - name: Build merged RetailHub
+        run: npm run build
