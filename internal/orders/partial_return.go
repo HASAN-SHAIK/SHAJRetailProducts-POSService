@@ -36,7 +36,10 @@ func (s *Service) ApplyPartialReturnStateTx(ctx context.Context, tx *sql.Tx, ord
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	order.Status = status
+	order.Status = strings.TrimSpace(order.Status)
+	if order.Status == "" {
+		order.Status = status
+	}
 	if fullRemaining {
 		order.Status = "returned"
 	}

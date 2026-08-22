@@ -57,6 +57,13 @@ func TestReturnPartialEmitsItemLevelFactAndFinalOperationAlsoEmitsSaleReturned(t
 	if payload.Order.Status != "completed" || payload.Order.Version != firstOrder.Version || len(payload.Lines) != 1 || payload.Lines[0].OrderItemID != "item-refund-full" || payload.Lines[0].QuantityMilli != 250 || payload.Lines[0].RefundMinor != 2500 {
 		t.Fatalf("partial event facts mismatch %+v", payload)
 	}
+	var localStatusAfterPartial string
+	if err := db.SQL().QueryRowContext(ctx, `SELECT status FROM sales_orders WHERE id='ord-refund-full'`).Scan(&localStatusAfterPartial); err != nil {
+		t.Fatal(err)
+	}
+	if localStatusAfterPartial == "partially_paid" {
+		t.Fatalf("partial return leaked payment status into sale lifecycle: %q", localStatusAfterPartial)
+	}
 
 	finalInput := PartialReturnInput{
 		ReturnID: "ret-event-2", OrderID: "ord-refund-full", ApprovedByUserID: "manager-2", Reason: "return remainder",

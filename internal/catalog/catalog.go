@@ -18,10 +18,14 @@ type Product struct {
 	CategoryID       *string  `json:"category_id,omitempty"`
 	SKU              *string  `json:"sku,omitempty"`
 	Name             string   `json:"name"`
+	Company          *string  `json:"company,omitempty"`
 	Description      *string  `json:"description,omitempty"`
 	UnitOfMeasure    *string  `json:"unit_of_measure,omitempty"`
 	TaxCode          *string  `json:"tax_code,omitempty"`
 	GSTRateBps       *int64   `json:"gst_rate_bps,omitempty"`
+	MRP              *float64 `json:"mrp,omitempty"`
+	ExpiryDate       *string  `json:"expiry_date,omitempty"`
+	IsWeightBased    bool     `json:"is_weight_based"`
 	IsActive         bool     `json:"is_active"`
 	AllowManualPrice bool     `json:"allow_manual_price"`
 	TrackInventory   bool     `json:"track_inventory"`
@@ -51,7 +55,7 @@ func NewRepository(db *database.DB) *Repository { return &Repository{db: db} }
 
 func (r *Repository) GetProduct(ctx context.Context, id, storeID string) (Product, error) {
 	row := r.db.SQL().QueryRowContext(ctx, `
-        SELECT id, category_id, sku, name, description, unit_of_measure, tax_code, gst_rate_bps,
+        SELECT id, category_id, sku, name, company, description, unit_of_measure, tax_code, gst_rate_bps, mrp, expiry_date, is_weight_based,
                is_active, allow_manual_price, track_inventory
         FROM catalog_products
         WHERE id = ?`, id)
@@ -74,7 +78,7 @@ func (r *Repository) GetByBarcode(ctx context.Context, barcode, storeID string) 
 		return Product{}, ErrNotFound
 	}
 	row := r.db.SQL().QueryRowContext(ctx, `
-        SELECT p.id, p.category_id, p.sku, p.name, p.description, p.unit_of_measure, p.tax_code, p.gst_rate_bps,
+        SELECT p.id, p.category_id, p.sku, p.name, p.company, p.description, p.unit_of_measure, p.tax_code, p.gst_rate_bps, p.mrp, p.expiry_date, p.is_weight_based,
                p.is_active, p.allow_manual_price, p.track_inventory
         FROM catalog_products p
         JOIN catalog_barcodes b ON b.product_id = p.id
@@ -99,7 +103,7 @@ func (r *Repository) Search(ctx context.Context, query, storeID string, limit in
 	}
 	like := "%" + query + "%"
 	rows, err := r.db.SQL().QueryContext(ctx, `
-        SELECT DISTINCT p.id, p.category_id, p.sku, p.name, p.description, p.unit_of_measure, p.tax_code, p.gst_rate_bps,
+        SELECT DISTINCT p.id, p.category_id, p.sku, p.name, p.company, p.description, p.unit_of_measure, p.tax_code, p.gst_rate_bps, p.mrp, p.expiry_date, p.is_weight_based,
                p.is_active, p.allow_manual_price, p.track_inventory
         FROM catalog_products p
         LEFT JOIN catalog_barcodes b ON b.product_id = p.id
@@ -194,14 +198,20 @@ type scanner interface{ Scan(dest ...any) error }
 func scanProduct(s scanner) (Product, error) {
 	var p Product
 	var gstRate sql.NullInt64
-	var active, manual, inventory int
-	if err := s.Scan(&p.ID, &p.CategoryID, &p.SKU, &p.Name, &p.Description, &p.UnitOfMeasure, &p.TaxCode, &gstRate, &active, &manual, &inventory); err != nil {
+	var mrp sql.NullFloat64
+	var weightBased, active, manual, inventory int
+	if err := s.Scan(&p.ID, &p.CategoryID, &p.SKU, &p.Name, &p.Company, &p.Description, &p.UnitOfMeasure, &p.TaxCode, &gstRate, &mrp, &p.ExpiryDate, &weightBased, &active, &manual, &inventory); err != nil {
 		return Product{}, err
 	}
 	if gstRate.Valid {
 		value := gstRate.Int64
 		p.GSTRateBps = &value
 	}
+	if mrp.Valid {
+		value := mrp.Float64
+		p.MRP = &value
+	}
+	p.IsWeightBased = weightBased == 1
 	p.IsActive = active == 1
 	p.AllowManualPrice = manual == 1
 	p.TrackInventory = inventory == 1
