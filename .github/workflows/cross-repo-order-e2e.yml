@@ -126,8 +126,14 @@ jobs:
             product_id BIGINT,
             quantity NUMERIC(14,3) NOT NULL DEFAULT 0,
             selling_price NUMERIC(14,2) NOT NULL DEFAULT 0,
+            purchase_price_snapshot NUMERIC(14,2),
+            profit NUMERIC(14,2) NOT NULL DEFAULT 0,
             discount_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
             gst_percent NUMERIC(8,3) NOT NULL DEFAULT 0
+          );
+          CREATE TABLE products (
+            id BIGINT PRIMARY KEY,
+            purchase_price NUMERIC(14,2)
           );
           SQL
 
