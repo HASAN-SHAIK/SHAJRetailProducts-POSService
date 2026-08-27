@@ -54,9 +54,9 @@ func (s *Service) EnsureInstallation(ctx context.Context) (Identity, error) {
 func (s *Service) EnsureInstallationWithSeed(ctx context.Context, seed InstallationSeed) (Identity, error) {
 	identity, err := s.Get(ctx)
 	if err == nil {
-		if seed.DeviceID != "" || seed.InstallationID != "" {
-			return s.ApplyInstallationSeed(ctx, seed)
-		}
+		// A seed is only for first installation creation. Once persisted, the
+		// physical device and installation identifiers must remain stable across
+		// restarts. Explicit repair/rebinding can use ApplyInstallationSeed.
 		return identity, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
