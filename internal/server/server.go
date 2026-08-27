@@ -59,6 +59,7 @@ func New(cfg config.Config, db *database.DB, deviceService *device.Service, cata
 	mux.HandleFunc("POST /api/v1/diagnostics/inbox/{id}/skip", s.handleSkipInboxDiagnostic)
 	mux.HandleFunc("GET /api/v1/device", s.handleGetDevice)
 	mux.HandleFunc("PUT /api/v1/device/registration", s.handleDeviceRegistration)
+	mux.HandleFunc("POST /api/v1/device/setup-code", s.handleDeviceSetupCode)
 	mux.HandleFunc("POST /api/v1/device/heartbeat", s.handleDeviceHeartbeat)
 	mux.HandleFunc("GET /api/v1/catalog/products", requirePermission("products:read", s.handleCatalogSearch))
 	mux.HandleFunc("GET /api/v1/catalog/products/barcode/{barcode}", requirePermission("products:read", s.handleCatalogBarcode))
@@ -145,6 +146,73 @@ func (s *Server) handleDeviceRegistration(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, identity)
+}
+func (s *Server) handleDeviceSetupCode(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		SetupCode string `json:"setup_code"`
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&input); err != nil || strings.TrimSpace(input.SetupCode) == "" {
+		writeError(w, http.StatusBadRequest, "setup_code_required")
+		return
+	}
+	if strings.TrimSpace(s.cfg.CentralAPIURL) == "" {
+		writeError(w, http.StatusConflict, "central_api_unconfigured")
+		return
+	}
+	identity, err := s.device.Get(r.Context())
+	if err != nil {
+		writeError(w, http.StatusConflict, "device_identity_unavailable")
+		return
+	}
+	body, _ := json.Marshal(map[string]any{
+		"setup_code":      strings.TrimSpace(input.SetupCode),
+		"device_id":       identity.DeviceID,
+		"installation_id": identity.InstallationID,
+		"device_name":     "Local POS",
+		"os_info":         r.UserAgent(),
+	})
+	endpoint := strings.TrimRight(s.cfg.CentralAPIURL, "/") + "/api/v1/pos-registration/setup-codes/claim"
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, endpoint, strings.NewReader(string(body)))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "setup_code_request_failed")
+		return
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: s.cfg.SyncRequestTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "central_setup_code_unreachable")
+		return
+	}
+	defer resp.Body.Close()
+	var payload struct {
+		TenantID   string `json:"tenant_id"`
+		RequestID  string `json:"request_id"`
+		DeviceID   string `json:"device_id"`
+		BranchID   string `json:"branch_id"`
+		TerminalID string `json:"terminal_id"`
+		Status     string `json:"status"`
+		Code       string `json:"code"`
+		Message    string `json:"message"`
+	}
+	_ = json.NewDecoder(http.MaxBytesReader(w, resp.Body, 128<<10)).Decode(&payload)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		code := payload.Code
+		if code == "" {
+			code = "central_setup_code_rejected"
+		}
+		writeError(w, resp.StatusCode, code)
+		return
+	}
+	registered, err := s.device.ApplyRegistration(r.Context(), device.Registration{StoreID: payload.BranchID, TerminalID: payload.TerminalID})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"device": registered, "central": payload})
 }
 func (s *Server) handleDeviceHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if err := s.device.RecordHeartbeat(r.Context()); err != nil {

@@ -14,6 +14,10 @@ func TestLoadUsesCanonicalEnvironmentNames(t *testing.T) {
 	t.Setenv("POS_SYNC_TENANT_ID", "tenant-dev")
 	t.Setenv("POS_SYNC_TOKEN", "sync-secret")
 	t.Setenv("POS_SYNC_INTERVAL", "3s")
+	t.Setenv("POS_DEVICE_ID", "SIM-POS-DTN-01")
+	t.Setenv("POS_INSTALLATION_ID", "SIM-INSTALL-DTN-01")
+	t.Setenv("POS_STORE_ID", "branch-downtown")
+	t.Setenv("POS_TERMINAL_ID", "T01")
 
 	cfg, err := Load()
 	if err != nil {
@@ -37,6 +41,12 @@ func TestLoadUsesCanonicalEnvironmentNames(t *testing.T) {
 	}
 	if cfg.SyncPollInterval.String() != "3s" {
 		t.Fatalf("SyncPollInterval = %s", cfg.SyncPollInterval)
+	}
+	if cfg.DeviceID != "SIM-POS-DTN-01" || cfg.InstallationID != "SIM-INSTALL-DTN-01" {
+		t.Fatalf("device seed = %q/%q", cfg.DeviceID, cfg.InstallationID)
+	}
+	if cfg.StoreID != "branch-downtown" || cfg.TerminalID != "T01" {
+		t.Fatalf("store terminal = %q/%q", cfg.StoreID, cfg.TerminalID)
 	}
 }
 
@@ -143,5 +153,17 @@ func TestLoadProductionAllowsGeneratedLocalTokenAndNonPlaceholderSyncSecret(t *t
 	}
 	if cfg.LocalAPIToken != "" {
 		t.Fatalf("LocalAPIToken = %q; expected generated-token mode", cfg.LocalAPIToken)
+	}
+}
+
+func TestLoadProductionRejectsDevelopmentIdentityOverrides(t *testing.T) {
+	t.Setenv("POS_ENVIRONMENT", "production")
+	t.Setenv("POS_CENTRAL_API_URL", "")
+	t.Setenv("POS_OFFLINE_GRANT_PUBLIC_KEY", "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A")
+	t.Setenv("POS_DEVICE_ID", "SIM-POS-DTN-01")
+
+	_, err := Load()
+	if err == nil || err.Error() != "development POS identity overrides are not allowed in production" {
+		t.Fatalf("Load() error = %v", err)
 	}
 }

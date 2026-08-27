@@ -17,6 +17,10 @@ type Config struct {
 	CentralAPIURL      string
 	CentralTenantID    string
 	CentralSyncToken   string
+	DeviceID           string
+	InstallationID     string
+	StoreID            string
+	TerminalID         string
 	SyncRequestTimeout time.Duration
 	SyncPollInterval   time.Duration
 	LocalAPIToken      string
@@ -58,6 +62,8 @@ func Load() (Config, error) {
 		Environment: envOrDefault("POS_ENVIRONMENT", "development"), ListenAddress: envOrDefaultAlias("POS_LISTEN_ADDRESS", "POS_SERVICE_ADDRESS", "127.0.0.1:4782"),
 		DatabasePath: databasePath, CentralAPIURL: strings.TrimRight(strings.TrimSpace(os.Getenv("POS_CENTRAL_API_URL")), "/"),
 		CentralTenantID: strings.TrimSpace(envAlias("POS_SYNC_TENANT_ID", "POS_CENTRAL_TENANT_ID")), CentralSyncToken: strings.TrimSpace(envAlias("POS_SYNC_TOKEN", "POS_CENTRAL_SYNC_TOKEN")),
+		DeviceID: strings.TrimSpace(os.Getenv("POS_DEVICE_ID")), InstallationID: strings.TrimSpace(os.Getenv("POS_INSTALLATION_ID")),
+		StoreID: strings.TrimSpace(os.Getenv("POS_STORE_ID")), TerminalID: strings.TrimSpace(os.Getenv("POS_TERMINAL_ID")),
 		SyncRequestTimeout: requestTimeout, SyncPollInterval: pollInterval,
 		LocalAPIToken: os.Getenv("POS_LOCAL_API_TOKEN"), LocalTokenFile: envOrDefault("POS_LOCAL_TOKEN_FILE", databasePath+".token"),
 		OfflineGrantSecret: normalizeMultilineEnv("POS_OFFLINE_GRANT_PUBLIC_KEY"),
@@ -104,6 +110,9 @@ func validateProductionSecurity(cfg Config) error {
 	}
 	if strings.TrimSpace(cfg.OfflineGrantSecret) == "" {
 		return fmt.Errorf("POS_OFFLINE_GRANT_PUBLIC_KEY is required in production")
+	}
+	if strings.TrimSpace(cfg.DeviceID) != "" || strings.TrimSpace(cfg.InstallationID) != "" || strings.TrimSpace(cfg.StoreID) != "" || strings.TrimSpace(cfg.TerminalID) != "" {
+		return fmt.Errorf("development POS identity overrides are not allowed in production")
 	}
 	if cfg.CentralAPIURL != "" && isPlaceholderSecret(cfg.CentralSyncToken) {
 		return fmt.Errorf("POS_SYNC_TOKEN must not use a placeholder value in production")
