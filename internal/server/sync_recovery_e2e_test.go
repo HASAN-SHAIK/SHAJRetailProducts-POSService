@@ -41,7 +41,7 @@ func TestCentralAuthorizedDeadLetterRecoveryResumesOrderedRefundSync(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	identity, err = deviceService.ApplyRegistration(ctx, device.Registration{StoreID: "store-e2e", TerminalID: "terminal-e2e"})
+	identity, err = deviceService.ApplyRegistration(ctx, device.Registration{StoreID: "store-e2e", StoreNumber: "STORE-E2E", POSNo: "POS-E2E", TouchpointID: "TP-E2E"})
 	if err != nil {
 		t.Fatal(err)
 	}
