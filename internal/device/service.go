@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
@@ -16,6 +17,10 @@ type Identity struct {
 	DeviceID        string  `json:"device_id"`
 	InstallationID  string  `json:"installation_id"`
 	StoreID         *string `json:"store_id,omitempty"`
+	StoreNumber     *string `json:"store_number,omitempty"`
+	POSNo           *string `json:"pos_no,omitempty"`
+	TouchpointID    *string `json:"touchpoint_id,omitempty"`
+	// TerminalID is retained as a compatibility alias while callers migrate to pos_no.
 	TerminalID      *string `json:"terminal_id,omitempty"`
 	Status          string  `json:"status"`
 	RegisteredAt    *string `json:"registered_at,omitempty"`
@@ -25,8 +30,12 @@ type Identity struct {
 }
 
 type Registration struct {
-	StoreID    string `json:"store_id"`
-	TerminalID string `json:"terminal_id"`
+	StoreID      string `json:"store_id"`
+	StoreNumber  string `json:"store_number"`
+	POSNo        string `json:"pos_no"`
+	TouchpointID string `json:"touchpoint_id"`
+	// TerminalID accepts legacy clients. POSNo wins when both are supplied.
+	TerminalID string `json:"terminal_id,omitempty"`
 }
 
 type Service struct{ db *database.DB }
@@ -45,9 +54,9 @@ func (s *Service) EnsureInstallation(ctx context.Context) (Identity, error) {
 func (s *Service) EnsureInstallationWithSeed(ctx context.Context, seed InstallationSeed) (Identity, error) {
 	identity, err := s.Get(ctx)
 	if err == nil {
-		if seed.DeviceID != "" || seed.InstallationID != "" {
-			return s.ApplyInstallationSeed(ctx, seed)
-		}
+		// A seed is only for first installation creation. Once persisted, the
+		// physical device and installation identifiers must remain stable across
+		// restarts. Explicit repair/rebinding can use ApplyInstallationSeed.
 		return identity, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -55,14 +64,14 @@ func (s *Service) EnsureInstallationWithSeed(ctx context.Context, seed Installat
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	deviceID := seed.DeviceID
+	deviceID := strings.TrimSpace(seed.DeviceID)
 	if deviceID == "" {
 		deviceID, err = randomID("dev", 16)
 		if err != nil {
 			return Identity{}, err
 		}
 	}
-	installationID := seed.InstallationID
+	installationID := strings.TrimSpace(seed.InstallationID)
 	if installationID == "" {
 		installationID, err = randomID("install", 24)
 		if err != nil {
@@ -104,18 +113,21 @@ func (s *Service) ApplyInstallationSeed(ctx context.Context, seed InstallationSe
 
 func (s *Service) Get(ctx context.Context) (Identity, error) {
 	var out Identity
-	var storeID, terminalID, registeredAt, heartbeat sql.NullString
+	var storeID, storeNumber, posNo, touchpointID, terminalID, registeredAt, heartbeat sql.NullString
 	err := s.db.SQL().QueryRowContext(ctx, `
-        SELECT device_id, installation_id, store_id, terminal_id, status,
-               registered_at, last_heartbeat_at, created_at, updated_at
+        SELECT device_id, installation_id, store_id, store_number, pos_no, touchpoint_id,
+               terminal_id, status, registered_at, last_heartbeat_at, created_at, updated_at
         FROM device_identity WHERE singleton_id = 1`).Scan(
-		&out.DeviceID, &out.InstallationID, &storeID, &terminalID, &out.Status,
-		&registeredAt, &heartbeat, &out.CreatedAt, &out.UpdatedAt,
+		&out.DeviceID, &out.InstallationID, &storeID, &storeNumber, &posNo, &touchpointID,
+		&terminalID, &out.Status, &registeredAt, &heartbeat, &out.CreatedAt, &out.UpdatedAt,
 	)
 	if err != nil {
 		return Identity{}, err
 	}
 	out.StoreID = nullableString(storeID)
+	out.StoreNumber = nullableString(storeNumber)
+	out.POSNo = nullableString(posNo)
+	out.TouchpointID = nullableString(touchpointID)
 	out.TerminalID = nullableString(terminalID)
 	out.RegisteredAt = nullableString(registeredAt)
 	out.LastHeartbeatAt = nullableString(heartbeat)
@@ -123,14 +135,23 @@ func (s *Service) Get(ctx context.Context) (Identity, error) {
 }
 
 func (s *Service) ApplyRegistration(ctx context.Context, registration Registration) (Identity, error) {
-	if registration.StoreID == "" || registration.TerminalID == "" {
-		return Identity{}, errors.New("store_id and terminal_id are required")
+	storeID := strings.TrimSpace(registration.StoreID)
+	storeNumber := strings.TrimSpace(registration.StoreNumber)
+	posNo := strings.TrimSpace(registration.POSNo)
+	if posNo == "" {
+		posNo = strings.TrimSpace(registration.TerminalID)
+	}
+	touchpointID := strings.TrimSpace(registration.TouchpointID)
+	if storeID == "" || storeNumber == "" || posNo == "" || touchpointID == "" {
+		return Identity{}, errors.New("store_id, store_number, pos_no and touchpoint_id are required")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := s.db.SQL().ExecContext(ctx, `
         UPDATE device_identity
-        SET store_id = ?, terminal_id = ?, status = 'active', registered_at = COALESCE(registered_at, ?), updated_at = ?
-        WHERE singleton_id = 1 AND status <> 'revoked'`, registration.StoreID, registration.TerminalID, now, now)
+        SET store_id = ?, store_number = ?, pos_no = ?, touchpoint_id = ?, terminal_id = ?,
+            status = 'active', registered_at = COALESCE(registered_at, ?), updated_at = ?
+        WHERE singleton_id = 1 AND status <> 'revoked'`,
+		storeID, storeNumber, posNo, touchpointID, posNo, now, now)
 	if err != nil {
 		return Identity{}, fmt.Errorf("apply device registration: %w", err)
 	}

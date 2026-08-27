@@ -31,7 +31,7 @@ func TestCompletedSaleCommitsReceiptInventoryAndOutboxTogether(t *testing.T) {
     db := testutil.OpenDatabase(t)
     deviceService := device.New(db)
     if _, err := deviceService.EnsureInstallation(ctx); err != nil { t.Fatal(err) }
-    if _, err := deviceService.ApplyRegistration(ctx, device.Registration{StoreID:"store-1",TerminalID:"terminal-1"}); err != nil { t.Fatal(err) }
+    if _, err := deviceService.ApplyRegistration(ctx, device.Registration{StoreID:"store-1",StoreNumber:"STORE-001",POSNo:"POS-01",TouchpointID:"TP-01"}); err != nil { t.Fatal(err) }
 
     inboxService := inbox.New(db)
     applyCatalogMessage(t, inboxService, "product-1", "catalog.product.upsert", map[string]any{
@@ -48,7 +48,7 @@ func TestCompletedSaleCommitsReceiptInventoryAndOutboxTogether(t *testing.T) {
     receiptService := receipts.New(db)
 
     order, err := orderService.Create(ctx, orders.CreateInput{
-        ClientOrderID:"client-order-1", StoreID:"store-1", TerminalID:strptr("terminal-1"), Currency:"INR",
+        ClientOrderID:"client-order-1", StoreID:"store-1", TerminalID:strptr("POS-01"), Currency:"INR",
         Items:[]orders.ItemInput{{ProductID:"1",QuantityMilli:1000,DiscountMinor:0,TaxMinor:0}},
     })
     if err != nil { t.Fatalf("create order: %v", err) }

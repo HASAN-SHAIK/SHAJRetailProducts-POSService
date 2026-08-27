@@ -32,7 +32,7 @@ func TestOrderVerticalSlicePersistsAcrossSQLiteRestart(t *testing.T) {
 	if _, err := deviceService.EnsureInstallation(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := deviceService.ApplyRegistration(ctx, device.Registration{StoreID: "store-1", TerminalID: "terminal-1"}); err != nil {
+	if _, err := deviceService.ApplyRegistration(ctx, device.Registration{StoreID: "store-1", StoreNumber: "STORE-001", POSNo: "POS-01", TouchpointID: "TP-01"}); err != nil {
 		t.Fatal(err)
 	}
 	seedOrderCatalog(t, db)
@@ -85,7 +85,7 @@ func TestOrderCreateAcceptsCentralNumericCustomerID(t *testing.T) {
 	if _, err := deviceService.EnsureInstallation(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := deviceService.ApplyRegistration(ctx, device.Registration{StoreID: "store-1", TerminalID: "terminal-1"}); err != nil {
+	if _, err := deviceService.ApplyRegistration(ctx, device.Registration{StoreID: "store-1", StoreNumber: "STORE-001", POSNo: "POS-01", TouchpointID: "TP-01"}); err != nil {
 		t.Fatal(err)
 	}
 	seedOrderCatalog(t, db)
@@ -130,7 +130,7 @@ func TestOrderListAndDetailReadSQLiteOrders(t *testing.T) {
 	if _, err := deviceService.EnsureInstallation(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := deviceService.ApplyRegistration(ctx, device.Registration{StoreID: "store-1", TerminalID: "terminal-1"}); err != nil {
+	if _, err := deviceService.ApplyRegistration(ctx, device.Registration{StoreID: "store-1", StoreNumber: "STORE-001", POSNo: "POS-01", TouchpointID: "TP-01"}); err != nil {
 		t.Fatal(err)
 	}
 	seedOrderCatalog(t, db)
