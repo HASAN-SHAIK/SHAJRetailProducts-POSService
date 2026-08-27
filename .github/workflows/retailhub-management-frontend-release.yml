@@ -1,0 +1,35 @@
+name: RetailHub management Frontend acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'docs/RETAILHUB_MANAGEMENT_MIGRATION_CERTIFICATION.md'
+      - '.github/workflows/retailhub-management-*.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend-pos-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      REACT_APP_POS_LOCAL_API_ENABLED: 'true'
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: HASAN-SHAIK/SHAJRetailProducts-Frontend
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Complete Frontend Jest suite
+        run: npm test -- --watchAll=false
+      - name: Production build
+        env:
+          CI: 'false'
+        run: npm run build
