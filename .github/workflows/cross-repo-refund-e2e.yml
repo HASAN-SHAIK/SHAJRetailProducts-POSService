@@ -137,7 +137,7 @@ jobs:
             is_deleted BOOLEAN NOT NULL DEFAULT FALSE
           );
           INSERT INTO products(id, stock_quantity, purchase_price, is_batch_enabled, updated_at, is_deleted)
-          VALUES(101, 4.000, 0, TRUE, NOW(), FALSE);
+          VALUES(101, 5.000, 0, TRUE, NOW(), FALSE);
           CREATE TABLE batches (
             id UUID PRIMARY KEY,
             product_id BIGINT NOT NULL REFERENCES products(id),
@@ -150,7 +150,7 @@ jobs:
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
           );
           INSERT INTO batches(id,product_id,branch_id,quantity,quantity_remaining,expiry_date,is_deleted)
-          VALUES('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',101,'11111111-1111-1111-1111-111111111111',5.000,4.000,CURRENT_DATE + 30,FALSE);
+          VALUES('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',101,'11111111-1111-1111-1111-111111111111',5.000,5.000,CURRENT_DATE + 30,FALSE);
           CREATE TABLE branch_devices (
             id UUID PRIMARY KEY,
             device_id TEXT NOT NULL UNIQUE,
@@ -169,15 +169,6 @@ jobs:
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-13-pos-inventory-canonical-application.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-14-pos-inventory-batch-allocations.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-14-pos-inventory-reconciliation-provenance.sql
-          psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 <<'SQL'
-          INSERT INTO pos_inventory_batch_allocations(
-            movement_id,allocation_seq,order_id,order_item_id,product_id,branch_id,batch_id,
-            quantity_milli,allocation_kind,source_movement_type
-          ) VALUES(
-            'issue-refund-cross-repo-e2e',1,'ord-refund-cross-repo-e2e','item-refund-cross-repo-e2e',101,
-            '11111111-1111-1111-1111-111111111111','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',1000,'batch','sale_issue'
-          );
-          SQL
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-08-canonical-pos-orders.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-08-pos-cashier-audit.sql
           psql -h 127.0.0.1 -U postgres -d tenant_e2e -v ON_ERROR_STOP=1 -f backend/Db/migrations/2026-08-18-pos-sale-tax-snapshots.sql
