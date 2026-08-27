@@ -113,6 +113,7 @@ jobs:
             order_status TEXT NOT NULL DEFAULT 'pending',
             transaction_type TEXT,
             billing_type TEXT,
+            source_refunded_by_user_id TEXT,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             is_deleted BOOLEAN NOT NULL DEFAULT FALSE
