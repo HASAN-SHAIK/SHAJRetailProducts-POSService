@@ -64,12 +64,12 @@ func main() {
 		slog.Error("initialize device identity", "error", err)
 		os.Exit(1)
 	}
-	if cfg.StoreID != "" || cfg.TerminalID != "" {
-		if cfg.StoreID == "" || cfg.TerminalID == "" {
-			slog.Error("POS_STORE_ID and POS_TERMINAL_ID must be configured together")
+	if cfg.StoreID != "" || cfg.StoreNumber != "" || cfg.POSNo != "" || cfg.TouchpointID != "" || cfg.TerminalID != "" {
+		if cfg.StoreID == "" || cfg.StoreNumber == "" || cfg.POSNo == "" || cfg.TouchpointID == "" {
+			slog.Error("POS_STORE_ID, POS_STORE_NUMBER, POS_NO and POS_TOUCHPOINT_ID must be configured together")
 			os.Exit(1)
 		}
-		identity, err = deviceService.ApplyRegistration(startupCtx, device.Registration{StoreID: cfg.StoreID, TerminalID: cfg.TerminalID})
+		identity, err = deviceService.ApplyRegistration(startupCtx, device.Registration{StoreID: cfg.StoreID, StoreNumber: cfg.StoreNumber, POSNo: cfg.POSNo, TouchpointID: cfg.TouchpointID, TerminalID: cfg.TerminalID})
 		if err != nil {
 			slog.Error("apply configured POS store identity", "error", err)
 			os.Exit(1)

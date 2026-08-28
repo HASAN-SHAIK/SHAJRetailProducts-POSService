@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
 	"log/slog"
 	"net"
@@ -20,6 +21,9 @@ type Config struct {
 	DeviceID           string
 	InstallationID     string
 	StoreID            string
+	StoreNumber        string
+	POSNo              string
+	TouchpointID       string
 	TerminalID         string
 	SyncRequestTimeout time.Duration
 	SyncPollInterval   time.Duration
@@ -36,6 +40,10 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	if err := loadDotEnvFile(".env"); err != nil {
+		return Config{}, err
+	}
+
 	requestTimeout, err := durationEnv("POS_SYNC_REQUEST_TIMEOUT", 10*time.Second)
 	if err != nil {
 		return Config{}, err
@@ -63,7 +71,9 @@ func Load() (Config, error) {
 		DatabasePath: databasePath, CentralAPIURL: strings.TrimRight(strings.TrimSpace(os.Getenv("POS_CENTRAL_API_URL")), "/"),
 		CentralTenantID: strings.TrimSpace(envAlias("POS_SYNC_TENANT_ID", "POS_CENTRAL_TENANT_ID")), CentralSyncToken: strings.TrimSpace(envAlias("POS_SYNC_TOKEN", "POS_CENTRAL_SYNC_TOKEN")),
 		DeviceID: strings.TrimSpace(os.Getenv("POS_DEVICE_ID")), InstallationID: strings.TrimSpace(os.Getenv("POS_INSTALLATION_ID")),
-		StoreID: strings.TrimSpace(os.Getenv("POS_STORE_ID")), TerminalID: strings.TrimSpace(os.Getenv("POS_TERMINAL_ID")),
+		StoreID: strings.TrimSpace(os.Getenv("POS_STORE_ID")), StoreNumber: strings.TrimSpace(os.Getenv("POS_STORE_NUMBER")),
+		POSNo: strings.TrimSpace(envAlias("POS_NO", "POS_TERMINAL_ID")), TouchpointID: strings.TrimSpace(os.Getenv("POS_TOUCHPOINT_ID")),
+		TerminalID:         strings.TrimSpace(os.Getenv("POS_TERMINAL_ID")),
 		SyncRequestTimeout: requestTimeout, SyncPollInterval: pollInterval,
 		LocalAPIToken: os.Getenv("POS_LOCAL_API_TOKEN"), LocalTokenFile: envOrDefault("POS_LOCAL_TOKEN_FILE", databasePath+".token"),
 		OfflineGrantSecret: normalizeMultilineEnv("POS_OFFLINE_GRANT_PUBLIC_KEY"),
@@ -111,7 +121,7 @@ func validateProductionSecurity(cfg Config) error {
 	if strings.TrimSpace(cfg.OfflineGrantSecret) == "" {
 		return fmt.Errorf("POS_OFFLINE_GRANT_PUBLIC_KEY is required in production")
 	}
-	if strings.TrimSpace(cfg.DeviceID) != "" || strings.TrimSpace(cfg.InstallationID) != "" || strings.TrimSpace(cfg.StoreID) != "" || strings.TrimSpace(cfg.TerminalID) != "" {
+	if strings.TrimSpace(cfg.DeviceID) != "" || strings.TrimSpace(cfg.InstallationID) != "" || strings.TrimSpace(cfg.StoreID) != "" || strings.TrimSpace(cfg.StoreNumber) != "" || strings.TrimSpace(cfg.POSNo) != "" || strings.TrimSpace(cfg.TouchpointID) != "" || strings.TrimSpace(cfg.TerminalID) != "" {
 		return fmt.Errorf("development POS identity overrides are not allowed in production")
 	}
 	if cfg.CentralAPIURL != "" && isPlaceholderSecret(cfg.CentralSyncToken) {
@@ -242,4 +252,42 @@ func intEnv(key string, fallback int) (int, error) {
 }
 func warnDeprecatedEnv(oldKey, newKey string) {
 	slog.Warn("deprecated environment variable configured", "old", oldKey, "new", newKey)
+}
+
+func loadDotEnvFile(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("load %s: %w", path, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key == "" || os.Getenv(key) != "" {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if unquoted, err := strconv.Unquote(value); err == nil {
+			value = unquoted
+		}
+		if err := os.Setenv(key, value); err != nil {
+			return fmt.Errorf("set %s from %s: %w", key, path, err)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	return nil
 }
