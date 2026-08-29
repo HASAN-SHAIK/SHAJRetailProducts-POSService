@@ -225,9 +225,11 @@ func (s *Server) handleOrderCreate(w http.ResponseWriter, r *http.Request) {
 	input.StoreID = *identity.StoreID
 	input.TerminalID = identity.POSNo
 	order, err := s.orders.Create(r.Context(), input)
-	if errors.Is(err, orders.ErrCustomerNotFound) { writeError(w, http.StatusBadRequest, "customer_not_found"); return }
-	if errors.Is(err, orders.ErrInvalidOrder) { writeError(w, http.StatusBadRequest, "invalid_order"); return }
-	if err != nil { writeError(w, http.StatusBadRequest, "order_create_failed"); return }
+	if err != nil {
+		status, code := classifyOrderCreateError(err)
+		writeError(w, status, code)
+		return
+	}
 	if err := s.recordOrderCreator(r.Context(), order.ID); err != nil { writeError(w, http.StatusInternalServerError, "order_audit_failed"); return }
 	if err := s.recordOrderApproval(r.Context(), order.ID); err != nil { writeError(w, http.StatusInternalServerError, "order_approval_audit_failed"); return }
 	writeJSON(w, http.StatusCreated, order)
