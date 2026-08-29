@@ -2,9 +2,11 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 
+	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/catalog"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/orders"
 )
 
@@ -15,6 +17,8 @@ func TestV1OrderCreateErrorContract(t *testing.T) {
 		status int
 		code   string
 	}{
+		{"customer missing", orders.ErrCustomerNotFound, http.StatusBadRequest, "customer_not_found"},
+		{"product missing", fmt.Errorf("load product 24: %w", catalog.ErrNotFound), http.StatusConflict, "product_not_found"},
 		{"price override denied", orders.ErrPriceOverrideNotAllowed, http.StatusUnprocessableEntity, "price_override_not_allowed"},
 		{"discount disabled", orders.ErrDiscountNotAllowed, http.StatusUnprocessableEntity, "discount_not_allowed"},
 		{"discount limit", orders.ErrDiscountLimitExceeded, http.StatusUnprocessableEntity, "discount_limit_exceeded"},
