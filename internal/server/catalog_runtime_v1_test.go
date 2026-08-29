@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/catalog"
+	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/device"
 )
 
@@ -98,8 +99,21 @@ func TestV1CatalogRuntimeHTTPSearchBarcodeProductAndCategories(t *testing.T) {
 	}
 }
 
-func seedRuntimeCatalog(t *testing.T, db interface{ SQL() interface{} }) {
-	// Kept below as a concrete helper to avoid hiding the SQLite state under mocks.
+func seedRuntimeCatalog(t *testing.T, db *database.DB) {
+	t.Helper()
+	ctx := context.Background()
+	statements := []string{
+		`INSERT INTO catalog_categories(id,name,sort_order,is_active,version,updated_at) VALUES('category-dairy','Dairy',1,1,1,'2026-01-01T00:00:00Z')`,
+		`INSERT INTO catalog_products(id,category_id,sku,name,unit_of_measure,is_active,allow_manual_price,track_inventory,version,updated_at) VALUES('product-milk','category-dairy','MILK-500','Amul Milk 500ml','unit',1,0,1,1,'2026-01-01T00:00:00Z')`,
+		`INSERT INTO catalog_barcodes(barcode,product_id,is_primary,updated_at) VALUES('8901234567890','product-milk',1,'2026-01-01T00:00:00Z')`,
+		`INSERT INTO catalog_prices(id,product_id,store_id,currency,amount_minor,tax_inclusive,priority,version,updated_at) VALUES('price-milk','product-milk','store-1','INR',3200,1,100,1,'2026-01-01T00:00:00Z')`,
+		`INSERT INTO catalog_products(id,sku,name,unit_of_measure,is_active,allow_manual_price,track_inventory,version,updated_at) VALUES('product-retired','OLD-1','Retired Product','unit',0,0,1,1,'2026-01-01T00:00:00Z')`,
+	}
+	for _, statement := range statements {
+		if _, err := db.SQL().ExecContext(ctx, statement); err != nil {
+			t.Fatalf("seed catalog: %v", err)
+		}
+	}
 }
 
 func assertRuntimeProduct(t *testing.T, product catalog.Product) {
