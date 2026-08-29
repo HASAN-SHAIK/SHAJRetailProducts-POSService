@@ -118,7 +118,7 @@ func TestMultiItemCashSaleOverLiveHTTPServer(t *testing.T) {
 		t.Fatalf("payment=%d receipt=%d movements=%d sale.completed outbox=%d", paymentCount, receiptCount, movementCount, completionOutboxCount)
 	}
 
-	rows, err := db.SQL().Query(`SELECT product_id, quantity_milli FROM inventory_movements WHERE reference_type='sale_order' AND reference_id=? ORDER BY product_id`, order.ID)
+	rows, err := db.SQL().Query(`SELECT product_id, quantity_delta_milli FROM inventory_movements WHERE reference_type='sale_order' AND reference_id=? ORDER BY product_id`, order.ID)
 	if err != nil { t.Fatal(err) }
 	defer rows.Close()
 	got := map[string]int64{}
