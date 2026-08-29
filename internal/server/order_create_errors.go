@@ -4,11 +4,16 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/catalog"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/orders"
 )
 
 func classifyOrderCreateError(err error) (int, string) {
 	switch {
+	case errors.Is(err, orders.ErrCustomerNotFound):
+		return http.StatusBadRequest, "customer_not_found"
+	case errors.Is(err, catalog.ErrNotFound):
+		return http.StatusConflict, "product_not_found"
 	case errors.Is(err, orders.ErrPriceOverrideNotAllowed):
 		return http.StatusUnprocessableEntity, "price_override_not_allowed"
 	case errors.Is(err, orders.ErrDiscountNotAllowed):
