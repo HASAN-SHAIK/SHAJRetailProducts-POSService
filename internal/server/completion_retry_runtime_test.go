@@ -40,8 +40,9 @@ func TestCompletionRetryDoesNotDuplicateSaleSideEffectsOverLiveHTTP(t *testing.T
 	})
 
 	catalogRepo := catalog.NewRepository(db)
+	addr := reserveAddress(t)
 	app := New(
-		config.Config{Environment: "test", ListenAddress: reserveAddress(t)},
+		config.Config{Environment: "test", ListenAddress: addr},
 		db,
 		deviceService,
 		catalogRepo,
@@ -66,7 +67,7 @@ func TestCompletionRetryDoesNotDuplicateSaleSideEffectsOverLiveHTTP(t *testing.T
 		}
 	})
 
-	baseURL := "http://" + app.Config().ListenAddress
+	baseURL := "http://" + addr
 	client := &http.Client{Timeout: 2 * time.Second}
 	waitForHealthyServer(t, client, baseURL)
 
