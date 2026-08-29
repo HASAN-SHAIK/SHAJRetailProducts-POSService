@@ -168,8 +168,8 @@ func TestInvalidPaymentsRejectedOverLiveHTTPServer(t *testing.T) {
 	if err := db.SQL().QueryRow(`SELECT status FROM sales_orders WHERE id=?`, order.ID).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
-	if status != "draft" {
-		t.Fatalf("invalid payment attempts mutated order status=%q want=draft", status)
+	if status != order.Status {
+		t.Fatalf("invalid payment attempts mutated order status=%q want=%q", status, order.Status)
 	}
 
 	validBody := map[string]any{
