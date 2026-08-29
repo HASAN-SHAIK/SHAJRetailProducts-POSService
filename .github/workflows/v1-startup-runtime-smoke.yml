@@ -1,0 +1,125 @@
+name: V1 POS Startup Runtime Smoke
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Focused startup tests
+        run: go test ./internal/server -run 'TestV1Startup|Test.*Health|Test.*Ready' -count=1
+
+      - name: Build real POSService binary
+        run: go build -o "$RUNNER_TEMP/posservice" ./cmd/posservice
+
+      - name: Start, exercise, persist, restart, and exercise real service
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          export POS_ENVIRONMENT=test
+          export POS_LISTEN_ADDRESS=127.0.0.1:4782
+          export POS_SQLITE_PATH="$RUNNER_TEMP/shaj-pos-runtime.db"
+          export POS_LOCAL_TOKEN_FILE="$RUNNER_TEMP/shaj-pos-runtime.token"
+          export POS_LOCAL_API_TOKEN="runtime-smoke-local-token-0123456789abcdef"
+          export POS_BACKUP_DIRECTORY="$RUNNER_TEMP/backups"
+          export POS_BACKUP_INTERVAL=24h
+          export POS_BACKUP_RETENTION=2
+          export POS_OBSERVABILITY_INTERVAL=24h
+          unset POS_CENTRAL_API_URL POS_SYNC_TENANT_ID POS_SYNC_TOKEN POS_CENTRAL_TENANT_ID POS_CENTRAL_SYNC_TOKEN
+
+          LOG1="$RUNNER_TEMP/posservice-first.log"
+          LOG2="$RUNNER_TEMP/posservice-second.log"
+          PID=""
+
+          cleanup() {
+            if [[ -n "${PID:-}" ]] && kill -0 "$PID" 2>/dev/null; then
+              kill -TERM "$PID" || true
+              wait "$PID" || true
+            fi
+          }
+          trap cleanup EXIT
+
+          wait_for_health() {
+            local log="$1"
+            for i in $(seq 1 40); do
+              if curl --fail --silent --show-error http://127.0.0.1:4782/api/v1/health > "$RUNNER_TEMP/health.json"; then
+                return 0
+              fi
+              if ! kill -0 "$PID" 2>/dev/null; then
+                echo "POSService exited before becoming healthy"
+                cat "$log" || true
+                return 1
+              fi
+              sleep 0.25
+            done
+            echo "POSService did not become healthy"
+            cat "$log" || true
+            return 1
+          }
+
+          echo "Starting first real POSService process"
+          "$RUNNER_TEMP/posservice" >"$LOG1" 2>&1 &
+          PID=$!
+          wait_for_health "$LOG1"
+
+          curl --fail --silent --show-error http://127.0.0.1:4782/api/v1/health | tee "$RUNNER_TEMP/health-first.json"
+          curl --fail --silent --show-error http://127.0.0.1:4782/api/v1/ready | tee "$RUNNER_TEMP/ready-first.json"
+          grep -q '"status":"ok"' "$RUNNER_TEMP/health-first.json"
+          grep -q '"service":"shajretail-pos-service"' "$RUNNER_TEMP/health-first.json"
+          grep -q '"status":"ready"' "$RUNNER_TEMP/ready-first.json"
+
+          test -s "$POS_SQLITE_PATH"
+          sqlite3 "$POS_SQLITE_PATH" 'SELECT COUNT(*) FROM schema_migrations;' | tee "$RUNNER_TEMP/migration-count.txt"
+          test "$(cat "$RUNNER_TEMP/migration-count.txt")" -gt 0
+          sqlite3 "$POS_SQLITE_PATH" 'SELECT device_id, installation_id, status FROM pos_device_identity LIMIT 1;' | tee "$RUNNER_TEMP/device-before-restart.txt"
+          test -s "$RUNNER_TEMP/device-before-restart.txt"
+
+          echo "Stopping first process cleanly"
+          kill -TERM "$PID"
+          wait "$PID"
+          PID=""
+
+          echo "Restarting against the same SQLite database"
+          "$RUNNER_TEMP/posservice" >"$LOG2" 2>&1 &
+          PID=$!
+          wait_for_health "$LOG2"
+
+          curl --fail --silent --show-error http://127.0.0.1:4782/api/v1/ready | tee "$RUNNER_TEMP/ready-second.json"
+          grep -q '"status":"ready"' "$RUNNER_TEMP/ready-second.json"
+          sqlite3 "$POS_SQLITE_PATH" 'SELECT device_id, installation_id, status FROM pos_device_identity LIMIT 1;' | tee "$RUNNER_TEMP/device-after-restart.txt"
+          diff -u "$RUNNER_TEMP/device-before-restart.txt" "$RUNNER_TEMP/device-after-restart.txt"
+
+          echo "Stopping second process cleanly"
+          kill -TERM "$PID"
+          wait "$PID"
+          PID=""
+
+          grep -q 'starting POS service' "$LOG1"
+          grep -q 'local device identity ready' "$LOG1"
+          grep -q 'starting POS service' "$LOG2"
+          grep -q 'local device identity ready' "$LOG2"
+
+          echo "Real POSService startup/runtime/restart smoke passed"
+
+      - name: Relevant suite
+        run: go test ./... -count=1
+
+      - name: Vet
+        run: go vet ./...
