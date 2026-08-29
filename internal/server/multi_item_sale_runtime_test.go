@@ -39,12 +39,11 @@ func TestMultiItemCashSaleOverLiveHTTPServer(t *testing.T) {
 	}
 
 	catalogRepo := catalog.NewRepository(db)
-	app := New(config.Config{Environment: "test"}, db, deviceService, catalogRepo, customer.NewRepository(db), orders.New(db, catalogRepo), payments.New(db), inventory.New(db), receipts.New(db))
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil { t.Fatal(err) }
 	addr := ln.Addr().String()
 	_ = ln.Close()
-	app = New(config.Config{Environment: "test", ListenAddress: addr}, db, deviceService, catalogRepo, customer.NewRepository(db), orders.New(db, catalogRepo), payments.New(db), inventory.New(db), receipts.New(db))
+	app := New(config.Config{Environment: "test", ListenAddress: addr}, db, deviceService, catalogRepo, customer.NewRepository(db), orders.New(db, catalogRepo), payments.New(db), inventory.New(db), receipts.New(db))
 	serverErr := make(chan error, 1)
 	go func() { serverErr <- app.Start() }()
 	t.Cleanup(func() {
@@ -91,7 +90,7 @@ func TestMultiItemCashSaleOverLiveHTTPServer(t *testing.T) {
 	var order orders.Order
 	if err := json.NewDecoder(resp.Body).Decode(&order); err != nil { t.Fatal(err) }
 	_ = resp.Body.Close()
-	const wantTotal int64 = 319000 // 2*32.00 + 3*85.00
+	const wantTotal int64 = 31900 // 2*32.00 + 3*85.00
 	if order.TotalMinor != wantTotal { t.Fatalf("order total=%d want=%d", order.TotalMinor, wantTotal) }
 	if len(order.Items) != 2 { t.Fatalf("order items=%d want=2", len(order.Items)) }
 
