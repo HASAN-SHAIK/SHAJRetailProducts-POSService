@@ -80,7 +80,7 @@ jobs:
           test -s "$POS_SQLITE_PATH"
           sqlite3 "$POS_SQLITE_PATH" 'SELECT COUNT(*) FROM schema_migrations;' | tee "$RUNNER_TEMP/migration-count.txt"
           test "$(cat "$RUNNER_TEMP/migration-count.txt")" -gt 0
-          sqlite3 "$POS_SQLITE_PATH" 'SELECT device_id, installation_id, status FROM pos_device_identity LIMIT 1;' | tee "$RUNNER_TEMP/device-before-restart.txt"
+          sqlite3 "$POS_SQLITE_PATH" 'SELECT device_id, installation_id, status FROM device_identity WHERE singleton_id = 1;' | tee "$RUNNER_TEMP/device-before-restart.txt"
           test -s "$RUNNER_TEMP/device-before-restart.txt"
 
           kill -TERM "$PID"
@@ -93,7 +93,7 @@ jobs:
 
           curl --fail --silent --show-error http://127.0.0.1:4782/api/v1/ready | tee "$RUNNER_TEMP/ready-second.json"
           grep -q '"status":"ready"' "$RUNNER_TEMP/ready-second.json"
-          sqlite3 "$POS_SQLITE_PATH" 'SELECT device_id, installation_id, status FROM pos_device_identity LIMIT 1;' | tee "$RUNNER_TEMP/device-after-restart.txt"
+          sqlite3 "$POS_SQLITE_PATH" 'SELECT device_id, installation_id, status FROM device_identity WHERE singleton_id = 1;' | tee "$RUNNER_TEMP/device-after-restart.txt"
           diff -u "$RUNNER_TEMP/device-before-restart.txt" "$RUNNER_TEMP/device-after-restart.txt"
 
           kill -TERM "$PID"
