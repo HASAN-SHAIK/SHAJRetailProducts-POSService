@@ -22,7 +22,7 @@ import (
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/testutil"
 )
 
-func TestUnderpaidSaleCannotCompleteOverLiveHTTPServer(t *testing.T) {
+func TestPartialPaymentCompletionRecordsOutstandingBalanceOverLiveHTTPServer(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.OpenDatabase(t)
 	deviceService := device.New(db)
@@ -36,11 +36,11 @@ func TestUnderpaidSaleCannotCompleteOverLiveHTTPServer(t *testing.T) {
 	}
 
 	inboxService := inbox.New(db)
-	applyCatalogMessage(t, inboxService, "underpay-product-1", "catalog.product.upsert", map[string]any{
+	applyCatalogMessage(t, inboxService, "partial-product-1", "catalog.product.upsert", map[string]any{
 		"id": "1", "name": "Milk", "unit_of_measure": "unit", "is_active": true,
 		"allow_manual_price": false, "track_inventory": true, "version": 1,
 	})
-	applyCatalogMessage(t, inboxService, "underpay-price-1", "catalog.price.upsert", map[string]any{
+	applyCatalogMessage(t, inboxService, "partial-price-1", "catalog.price.upsert", map[string]any{
 		"id": "price-1", "product_id": "1", "store_id": "store-1", "currency": "INR",
 		"amount_minor": 12500, "tax_inclusive": true, "priority": 100, "version": 1,
 	})
@@ -95,7 +95,7 @@ func TestUnderpaidSaleCannotCompleteOverLiveHTTPServer(t *testing.T) {
 	}
 
 	orderRaw, _ := json.Marshal(map[string]any{
-		"client_order_id": "underpay-order-1",
+		"client_order_id": "partial-order-1",
 		"currency": "INR",
 		"items": []map[string]any{{"product_id": "1", "quantity_milli": 1000, "discount_minor": 0, "tax_minor": 0}},
 	})
@@ -120,7 +120,7 @@ func TestUnderpaidSaleCannotCompleteOverLiveHTTPServer(t *testing.T) {
 	}
 
 	paymentRaw, _ := json.Marshal(map[string]any{
-		"client_payment_id": "underpay-payment-1",
+		"client_payment_id": "partial-payment-1",
 		"mode": "cash",
 		"amount_minor": 12000,
 		"currency": "INR",
@@ -140,13 +140,13 @@ func TestUnderpaidSaleCannotCompleteOverLiveHTTPServer(t *testing.T) {
 
 	resp, err = client.Post(fmt.Sprintf("%s/api/v1/orders/%s/complete", baseURL, order.ID), "application/json", bytes.NewReader(nil))
 	if err != nil {
-		t.Fatalf("complete underpaid order request: %v", err)
+		t.Fatalf("complete partially paid order request: %v", err)
 	}
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		var body any
 		_ = json.NewDecoder(resp.Body).Decode(&body)
-		t.Fatalf("underpaid order unexpectedly completed: status=%d body=%v", resp.StatusCode, body)
+		t.Fatalf("partial-payment completion status=%d body=%v", resp.StatusCode, body)
 	}
 	_ = resp.Body.Close()
 
@@ -154,11 +154,22 @@ func TestUnderpaidSaleCannotCompleteOverLiveHTTPServer(t *testing.T) {
 	if err := db.SQL().QueryRow(`SELECT completed_at FROM sales_orders WHERE id=?`, order.ID).Scan(&completedAt); err != nil {
 		t.Fatal(err)
 	}
-	if completedAt != nil {
-		t.Fatalf("underpaid order persisted completed_at=%q", *completedAt)
+	if completedAt == nil {
+		t.Fatal("partially paid order did not persist completed_at")
 	}
 
-	var receiptCount, movementCount, completionOutboxCount int
+	var paidMinor, balanceMinor int64
+	if err := db.SQL().QueryRow(`SELECT paid_minor,balance_minor FROM receipts WHERE order_id=?`, order.ID).Scan(&paidMinor, &balanceMinor); err != nil {
+		t.Fatal(err)
+	}
+	if paidMinor != 12000 || balanceMinor != 500 {
+		t.Fatalf("receipt paid=%d balance=%d want paid=12000 balance=500", paidMinor, balanceMinor)
+	}
+
+	var paymentCount, receiptCount, movementCount, completionOutboxCount int
+	if err := db.SQL().QueryRow(`SELECT COUNT(*) FROM payments WHERE order_id=? AND status='captured'`, order.ID).Scan(&paymentCount); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.SQL().QueryRow(`SELECT COUNT(*) FROM receipts WHERE order_id=?`, order.ID).Scan(&receiptCount); err != nil {
 		t.Fatal(err)
 	}
@@ -168,15 +179,7 @@ func TestUnderpaidSaleCannotCompleteOverLiveHTTPServer(t *testing.T) {
 	if err := db.SQL().QueryRow(`SELECT COUNT(*) FROM outbox_events WHERE aggregate_type='sales_order' AND aggregate_id=? AND event_type='sale.completed'`, order.ID).Scan(&completionOutboxCount); err != nil {
 		t.Fatal(err)
 	}
-	if receiptCount != 0 || movementCount != 0 || completionOutboxCount != 0 {
-		t.Fatalf("underpaid completion leaked side effects: receipt=%d movement=%d sale.completed outbox=%d", receiptCount, movementCount, completionOutboxCount)
-	}
-
-	var paymentCount int
-	if err := db.SQL().QueryRow(`SELECT COUNT(*) FROM payments WHERE order_id=? AND status='captured'`, order.ID).Scan(&paymentCount); err != nil {
-		t.Fatal(err)
-	}
-	if paymentCount != 1 {
-		t.Fatalf("captured payment count=%d want=1", paymentCount)
+	if paymentCount != 1 || receiptCount != 1 || movementCount != 1 || completionOutboxCount != 1 {
+		t.Fatalf("partial-payment completion side effects: payment=%d receipt=%d movement=%d sale.completed=%d", paymentCount, receiptCount, movementCount, completionOutboxCount)
 	}
 }
