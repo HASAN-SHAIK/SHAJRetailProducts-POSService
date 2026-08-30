@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -10,8 +11,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"io"
+	"net"
 	"net/http"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,6 +22,11 @@ import (
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/device"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/localauth"
 )
+
+type authRuntimeResponse struct {
+	Status int
+	Body   []byte
+}
 
 func TestV1LocalAuthRuntimeHTTPEnrollLoginProtectedRouteLogout(t *testing.T) {
 	ctx := context.Background()
@@ -49,6 +56,7 @@ func TestV1LocalAuthRuntimeHTTPEnrollLoginProtectedRouteLogout(t *testing.T) {
 	app.cfg.OfflineGrantSecret = publicPEM
 	app.cfg.CentralTenantID = "tenant-1"
 	app.localAuth = localauth.New(db, publicPEM)
+	baseURL := startAuthLiveRuntime(t, app)
 
 	grant := authRuntimeSignedGrant(t, privateKey, map[string]any{
 		"type":              "pos_offline_grant",
@@ -65,28 +73,28 @@ func TestV1LocalAuthRuntimeHTTPEnrollLoginProtectedRouteLogout(t *testing.T) {
 		"exp":               time.Now().Add(time.Hour).Unix(),
 	})
 
-	enroll := authRuntimeRequest(t, app, http.MethodPost, "/api/v1/auth/enroll", map[string]any{
+	enroll := authRuntimeRequest(t, baseURL, http.MethodPost, "/api/v1/auth/enroll", map[string]any{
 		"offline_grant": grant,
 		"pin":           "2468",
 	}, "", "")
-	if enroll.Code != http.StatusOK {
-		t.Fatalf("enroll status=%d body=%s", enroll.Code, enroll.Body.String())
+	if enroll.Status != http.StatusOK {
+		t.Fatalf("enroll status=%d body=%s", enroll.Status, enroll.Body)
 	}
 
-	badLogin := authRuntimeRequest(t, app, http.MethodPost, "/api/v1/auth/login", map[string]any{
+	badLogin := authRuntimeRequest(t, baseURL, http.MethodPost, "/api/v1/auth/login", map[string]any{
 		"user_id": "cashier-1",
 		"pin":     "1111",
 	}, "", "")
-	if badLogin.Code != http.StatusUnauthorized {
-		t.Fatalf("bad login status=%d body=%s", badLogin.Code, badLogin.Body.String())
+	if badLogin.Status != http.StatusUnauthorized {
+		t.Fatalf("bad login status=%d body=%s", badLogin.Status, badLogin.Body)
 	}
 
-	login := authRuntimeRequest(t, app, http.MethodPost, "/api/v1/auth/login", map[string]any{
+	login := authRuntimeRequest(t, baseURL, http.MethodPost, "/api/v1/auth/login", map[string]any{
 		"user_id": "cashier-1",
 		"pin":     "2468",
 	}, "", "")
-	if login.Code != http.StatusOK {
-		t.Fatalf("login status=%d body=%s", login.Code, login.Body.String())
+	if login.Status != http.StatusOK {
+		t.Fatalf("login status=%d body=%s", login.Status, login.Body)
 	}
 	var loginBody struct {
 		SessionToken string `json:"session_token"`
@@ -98,7 +106,7 @@ func TestV1LocalAuthRuntimeHTTPEnrollLoginProtectedRouteLogout(t *testing.T) {
 			Permissions []string `json:"permissions"`
 		} `json:"user"`
 	}
-	if err := json.NewDecoder(login.Body).Decode(&loginBody); err != nil {
+	if err := json.Unmarshal(login.Body, &loginBody); err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(loginBody.SessionToken) == "" {
@@ -108,38 +116,86 @@ func TestV1LocalAuthRuntimeHTTPEnrollLoginProtectedRouteLogout(t *testing.T) {
 		t.Fatalf("unexpected login user: %#v", loginBody.User)
 	}
 
-	withoutSession := authRuntimeRequest(t, app, http.MethodGet, "/api/v1/catalog/products?q=milk", nil, "machine-token", "")
-	if withoutSession.Code != http.StatusUnauthorized {
-		t.Fatalf("protected route without session status=%d body=%s", withoutSession.Code, withoutSession.Body.String())
+	withoutSession := authRuntimeRequest(t, baseURL, http.MethodGet, "/api/v1/catalog/products?q=milk", nil, "machine-token", "")
+	if withoutSession.Status != http.StatusUnauthorized {
+		t.Fatalf("protected route without session status=%d body=%s", withoutSession.Status, withoutSession.Body)
 	}
 
-	withSession := authRuntimeRequest(t, app, http.MethodGet, "/api/v1/catalog/products?q=milk", nil, "machine-token", loginBody.SessionToken)
-	if withSession.Code != http.StatusOK {
-		t.Fatalf("protected route with valid session status=%d body=%s", withSession.Code, withSession.Body.String())
+	withSession := authRuntimeRequest(t, baseURL, http.MethodGet, "/api/v1/catalog/products?q=milk", nil, "machine-token", loginBody.SessionToken)
+	if withSession.Status != http.StatusOK {
+		t.Fatalf("protected route with valid session status=%d body=%s", withSession.Status, withSession.Body)
 	}
 
-	logout := authRuntimeRequest(t, app, http.MethodPost, "/api/v1/auth/logout", nil, "machine-token", loginBody.SessionToken)
-	if logout.Code != http.StatusNoContent {
-		t.Fatalf("logout status=%d body=%s", logout.Code, logout.Body.String())
+	logout := authRuntimeRequest(t, baseURL, http.MethodPost, "/api/v1/auth/logout", nil, "machine-token", loginBody.SessionToken)
+	if logout.Status != http.StatusNoContent {
+		t.Fatalf("logout status=%d body=%s", logout.Status, logout.Body)
 	}
 
-	afterLogout := authRuntimeRequest(t, app, http.MethodGet, "/api/v1/catalog/products?q=milk", nil, "machine-token", loginBody.SessionToken)
-	if afterLogout.Code != http.StatusUnauthorized {
-		t.Fatalf("logged-out session still authorized status=%d body=%s", afterLogout.Code, afterLogout.Body.String())
+	afterLogout := authRuntimeRequest(t, baseURL, http.MethodGet, "/api/v1/catalog/products?q=milk", nil, "machine-token", loginBody.SessionToken)
+	if afterLogout.Status != http.StatusUnauthorized {
+		t.Fatalf("logged-out session still authorized status=%d body=%s", afterLogout.Status, afterLogout.Body)
 	}
 }
 
-func authRuntimeRequest(t *testing.T, app *Server, method, path string, body any, machineToken, sessionToken string) *httptest.ResponseRecorder {
+func startAuthLiveRuntime(t *testing.T, app *Server) string {
 	t.Helper()
-	var payload string
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	app.cfg.ListenAddress = addr
+	app.httpServer.Addr = addr
+	serverErr := make(chan error, 1)
+	go func() { serverErr <- app.Start() }()
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = app.Shutdown(shutdownCtx)
+		select {
+		case err := <-serverErr:
+			if err != nil {
+				t.Errorf("auth runtime shutdown: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Error("auth runtime did not stop")
+		}
+	})
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		resp, err := client.Get("http://" + addr + "/api/v1/health")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return "http://" + addr
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("auth POSService runtime did not become healthy: %v", err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func authRuntimeRequest(t *testing.T, baseURL, method, path string, body any, machineToken, sessionToken string) authRuntimeResponse {
+	t.Helper()
+	var payload []byte
 	if body != nil {
-		raw, err := json.Marshal(body)
+		var err error
+		payload, err = json.Marshal(body)
 		if err != nil {
 			t.Fatal(err)
 		}
-		payload = string(raw)
 	}
-	req := httptest.NewRequest(method, path, strings.NewReader(payload))
+	req, err := http.NewRequest(method, baseURL+path, bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -149,9 +205,16 @@ func authRuntimeRequest(t *testing.T, app *Server, method, path string, body any
 	if sessionToken != "" {
 		req.Header.Set("X-POS-Session-Token", sessionToken)
 	}
-	res := httptest.NewRecorder()
-	app.httpServer.Handler.ServeHTTP(res, req)
-	return res
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("runtime request %s %s: %v", method, path, err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return authRuntimeResponse{Status: resp.StatusCode, Body: raw}
 }
 
 func authRuntimeTestKeyPair(t *testing.T) (*rsa.PrivateKey, string) {
