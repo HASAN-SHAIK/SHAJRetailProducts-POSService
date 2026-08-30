@@ -127,7 +127,7 @@ func TestV1LocalSessionSurvivesLivePOSServiceRestartAndLogoutPersists(t *testing
 	if err != nil {
 		t.Fatalf("read device after restart: %v", err)
 	}
-	if persistedIdentity.DeviceID != registered.DeviceID || persistedIdentity.StoreID != "store-1" {
+	if persistedIdentity.DeviceID != registered.DeviceID || persistedIdentity.StoreID == nil || *persistedIdentity.StoreID != "store-1" {
 		t.Fatalf("device identity did not survive restart: %+v", persistedIdentity)
 	}
 
