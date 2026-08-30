@@ -33,6 +33,15 @@ func TestProvisionalOversellCompletesAndExposesNegativeBalanceOverLiveHTTP(t *te
 	}
 	seedOrderCatalog(t, db)
 
+	// Explicitly seed one unit on hand. seedOrderCatalog only creates the
+	// product and store price; it does not establish an inventory balance.
+	seededAt := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := db.SQL().ExecContext(ctx, `
+		INSERT INTO inventory_balances(store_id,product_id,on_hand_milli,reserved_milli,version,updated_at)
+		VALUES(?,?,?,?,?,?)`, "store-1", "product-1", int64(1000), int64(0), 1, seededAt); err != nil {
+		t.Fatalf("seed one unit of starting inventory: %v", err)
+	}
+
 	catalogRepo := catalog.NewRepository(db)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
