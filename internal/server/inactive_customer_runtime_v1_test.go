@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -210,5 +209,3 @@ func inactiveCustomerJSON(t *testing.T, method, url string, body any, wantStatus
 	}
 	return raw
 }
-
-var _ = fmt.Sprintf
