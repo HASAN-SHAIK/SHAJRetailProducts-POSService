@@ -102,7 +102,7 @@ func TestDraftOrderVoidOverLiveHTTPIsDurableAndRetrySafe(t *testing.T) {
 	if resp.StatusCode != http.StatusConflict { _ = resp.Body.Close(); t.Fatalf("second void status=%d", resp.StatusCode) }
 	_ = resp.Body.Close()
 
-	var version int64
+	var version int
 	if err := db.SQL().QueryRowContext(ctx, `SELECT version FROM sales_orders WHERE id=?`, order.ID).Scan(&version); err != nil { t.Fatal(err) }
 	if version != persisted.Version { t.Fatalf("retry mutated voided order version: got=%d want=%d", version, persisted.Version) }
 }
