@@ -3,14 +3,22 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/catalog"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/database"
 	"github.com/HASAN-SHAIK/SHAJRetailProducts-POSService/internal/device"
 )
+
+type catalogRuntimeResponse struct {
+	Status int
+	Body   []byte
+}
 
 func TestV1CatalogRuntimeHTTPSearchBarcodeProductAndCategories(t *testing.T) {
 	ctx := context.Background()
@@ -27,16 +35,17 @@ func TestV1CatalogRuntimeHTTPSearchBarcodeProductAndCategories(t *testing.T) {
 
 	seedRuntimeCatalog(t, db)
 	app := newTestServer(db, deviceService)
+	baseURL := startCatalogLiveRuntime(t, app)
 
-	search := serveJSON(t, app, http.MethodGet, "/api/v1/catalog/products?q=milk&limit=10", nil)
-	if search.Code != http.StatusOK {
-		t.Fatalf("search status=%d body=%s", search.Code, search.Body.String())
+	search := catalogRuntimeGet(t, baseURL+"/api/v1/catalog/products?q=milk&limit=10")
+	if search.Status != http.StatusOK {
+		t.Fatalf("search status=%d body=%s", search.Status, search.Body)
 	}
 	var searchBody struct {
 		Items []catalog.Product `json:"items"`
 		Count int               `json:"count"`
 	}
-	if err := json.NewDecoder(search.Body).Decode(&searchBody); err != nil {
+	if err := json.Unmarshal(search.Body, &searchBody); err != nil {
 		t.Fatal(err)
 	}
 	if searchBody.Count != 1 || len(searchBody.Items) != 1 {
@@ -44,59 +53,118 @@ func TestV1CatalogRuntimeHTTPSearchBarcodeProductAndCategories(t *testing.T) {
 	}
 	assertRuntimeProduct(t, searchBody.Items[0])
 
-	barcode := serveJSON(t, app, http.MethodGet, "/api/v1/catalog/products/barcode/8901234567890", nil)
-	if barcode.Code != http.StatusOK {
-		t.Fatalf("barcode status=%d body=%s", barcode.Code, barcode.Body.String())
+	barcode := catalogRuntimeGet(t, baseURL+"/api/v1/catalog/products/barcode/8901234567890")
+	if barcode.Status != http.StatusOK {
+		t.Fatalf("barcode status=%d body=%s", barcode.Status, barcode.Body)
 	}
 	var barcodeProduct catalog.Product
-	if err := json.NewDecoder(barcode.Body).Decode(&barcodeProduct); err != nil {
+	if err := json.Unmarshal(barcode.Body, &barcodeProduct); err != nil {
 		t.Fatal(err)
 	}
 	assertRuntimeProduct(t, barcodeProduct)
 
-	product := serveJSON(t, app, http.MethodGet, "/api/v1/catalog/products/product-milk", nil)
-	if product.Code != http.StatusOK {
-		t.Fatalf("product status=%d body=%s", product.Code, product.Body.String())
+	product := catalogRuntimeGet(t, baseURL+"/api/v1/catalog/products/product-milk")
+	if product.Status != http.StatusOK {
+		t.Fatalf("product status=%d body=%s", product.Status, product.Body)
 	}
 	var byID catalog.Product
-	if err := json.NewDecoder(product.Body).Decode(&byID); err != nil {
+	if err := json.Unmarshal(product.Body, &byID); err != nil {
 		t.Fatal(err)
 	}
 	assertRuntimeProduct(t, byID)
 
-	categories := serveJSON(t, app, http.MethodGet, "/api/v1/catalog/categories", nil)
-	if categories.Code != http.StatusOK {
-		t.Fatalf("categories status=%d body=%s", categories.Code, categories.Body.String())
+	categories := catalogRuntimeGet(t, baseURL+"/api/v1/catalog/categories")
+	if categories.Status != http.StatusOK {
+		t.Fatalf("categories status=%d body=%s", categories.Status, categories.Body)
 	}
 	var categoryBody struct {
 		Items []catalog.Category `json:"items"`
 		Count int                `json:"count"`
 	}
-	if err := json.NewDecoder(categories.Body).Decode(&categoryBody); err != nil {
+	if err := json.Unmarshal(categories.Body, &categoryBody); err != nil {
 		t.Fatal(err)
 	}
 	if categoryBody.Count != 1 || len(categoryBody.Items) != 1 || categoryBody.Items[0].ID != "category-dairy" {
 		t.Fatalf("unexpected categories: %#v", categoryBody)
 	}
 
-	inactiveSearch := serveJSON(t, app, http.MethodGet, "/api/v1/catalog/products?q=retired", nil)
-	if inactiveSearch.Code != http.StatusOK {
-		t.Fatalf("inactive search status=%d body=%s", inactiveSearch.Code, inactiveSearch.Body.String())
+	inactiveSearch := catalogRuntimeGet(t, baseURL+"/api/v1/catalog/products?q=retired")
+	if inactiveSearch.Status != http.StatusOK {
+		t.Fatalf("inactive search status=%d body=%s", inactiveSearch.Status, inactiveSearch.Body)
 	}
 	var inactiveBody struct {
 		Count int `json:"count"`
 	}
-	if err := json.NewDecoder(inactiveSearch.Body).Decode(&inactiveBody); err != nil {
+	if err := json.Unmarshal(inactiveSearch.Body, &inactiveBody); err != nil {
 		t.Fatal(err)
 	}
 	if inactiveBody.Count != 0 {
 		t.Fatalf("inactive product leaked into cashier search: %#v", inactiveBody)
 	}
 
-	missingBarcode := serveJSON(t, app, http.MethodGet, "/api/v1/catalog/products/barcode/0000000000000", nil)
-	if missingBarcode.Code != http.StatusNotFound {
-		t.Fatalf("missing barcode status=%d body=%s", missingBarcode.Code, missingBarcode.Body.String())
+	missingBarcode := catalogRuntimeGet(t, baseURL+"/api/v1/catalog/products/barcode/0000000000000")
+	if missingBarcode.Status != http.StatusNotFound {
+		t.Fatalf("missing barcode status=%d body=%s", missingBarcode.Status, missingBarcode.Body)
 	}
+}
+
+func startCatalogLiveRuntime(t *testing.T, app *Server) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	app.cfg.ListenAddress = addr
+	app.httpServer.Addr = addr
+	serverErr := make(chan error, 1)
+	go func() { serverErr <- app.Start() }()
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = app.Shutdown(shutdownCtx)
+		select {
+		case err := <-serverErr:
+			if err != nil {
+				t.Errorf("catalog runtime shutdown: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Error("catalog runtime did not stop")
+		}
+	})
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		resp, err := client.Get("http://" + addr + "/api/v1/health")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return "http://" + addr
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("catalog POSService runtime did not become healthy: %v", err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func catalogRuntimeGet(t *testing.T, url string) catalogRuntimeResponse {
+	t.Helper()
+	resp, err := (&http.Client{Timeout: 2 * time.Second}).Get(url)
+	if err != nil {
+		t.Fatalf("runtime GET %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return catalogRuntimeResponse{Status: resp.StatusCode, Body: raw}
 }
 
 func seedRuntimeCatalog(t *testing.T, db *database.DB) {
