@@ -20,6 +20,12 @@ jobs:
           fetch-depth: 1
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Capture source SHA
         id: source
         shell: bash
@@ -28,6 +34,12 @@ jobs:
           sha="$(git rev-parse HEAD)"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           printf '%s\n' "$sha" > "$RUNNER_TEMP/source-sha.txt"
+
+      - name: Build POSService runtime executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build -o "$RUNNER_TEMP/posservice" ./cmd/posservice
 
       - name: Package runtime source
         shell: bash
@@ -48,5 +60,6 @@ jobs:
           path: |
             ${{ runner.temp }}/runtime-source.tar.gz
             ${{ runner.temp }}/source-sha.txt
+            ${{ runner.temp }}/posservice
           retention-days: 7
           if-no-files-found: error
