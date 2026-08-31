@@ -1,0 +1,52 @@
+name: Runtime Source Artifact
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  package-runtime-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Capture source SHA
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$sha" > "$RUNNER_TEMP/source-sha.txt"
+
+      - name: Package runtime source
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='dist' \
+            --exclude='build' \
+            --exclude='coverage' \
+            -czf "$RUNNER_TEMP/runtime-source.tar.gz" .
+
+      - name: Upload runtime source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-source-${{ steps.source.outputs.sha }}
+          path: |
+            ${{ runner.temp }}/runtime-source.tar.gz
+            ${{ runner.temp }}/source-sha.txt
+          retention-days: 7
+          if-no-files-found: error
