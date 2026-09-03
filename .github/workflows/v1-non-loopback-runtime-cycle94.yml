@@ -32,11 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           tmp="$(mktemp -d)"
-          port="$(python3 - <<'PY'
-import socket
-s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()
-PY
-)"
+          port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
           db="$tmp/non-loopback.db"
           token="$tmp/local-token"
           set +e
@@ -62,12 +58,14 @@ PY
           if (echo > /dev/tcp/127.0.0.1/${port}) 2>/dev/null; then reachable=true; fi
           echo "EXIT_CODE=$code"
           echo "LISTENER_REACHABLE=$reachable"
-          echo "DB_EXISTS=$([ -e "$db" ] && echo true || echo false)"
-          echo "TOKEN_FILE_EXISTS=$([ -e "$token" ] && echo true || echo false)"
+          if [ -e "$db" ]; then db_exists=true; else db_exists=false; fi
+          if [ -e "$token" ]; then token_exists=true; else token_exists=false; fi
+          echo "DB_EXISTS=$db_exists"
+          echo "TOKEN_FILE_EXISTS=$token_exists"
           grep -q "invalid configuration" "$tmp/runtime.log"
           grep -q "POS_LISTEN_ADDRESS must bind to loopback only" "$tmp/runtime.log"
           test "$code" -ne 0
           test "$reachable" = false
-          test ! -e "$db"
-          test ! -e "$token"
+          test "$db_exists" = false
+          test "$token_exists" = false
           echo "RUNTIME_PASS=true"
