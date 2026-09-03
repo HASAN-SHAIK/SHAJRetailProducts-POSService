@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestV1PartialConfiguredRegistrationFailsClosedBeforeListener(t *testing.T) {
@@ -68,7 +68,7 @@ func TestV1PartialConfiguredRegistrationFailsClosedBeforeListener(t *testing.T) 
 		t.Fatalf("POSService listener became reachable despite incomplete configured registration at %s", listenAddress)
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		t.Fatalf("open startup SQLite for persisted-state verification: %v", err)
 	}
