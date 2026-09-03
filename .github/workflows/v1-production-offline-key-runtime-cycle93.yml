@@ -1,0 +1,78 @@
+name: V1 Production Offline Key Runtime Cycle93
+
+on:
+  push:
+    branches:
+      - test/v1-production-offline-key-runtime-cycle93
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - name: Focused fail-closed test
+        run: go test ./cmd/posservice -run TestV1ProductionMissingOfflineGrantPublicKeyPreventsPOSServiceStartup -count=1 -v
+      - name: Full POS suite
+        run: go test ./...
+      - name: Vet POS service
+        run: go vet ./...
+      - name: Build runnable
+        run: go build -o ./posservice ./cmd/posservice
+      - name: Explicit production runtime probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          db="$tmp/production-missing-offline-key.db"
+          token="$tmp/pos.token"
+          backups="$tmp/backups"
+          port=$(python3 - <<'PY'
+          import socket
+          s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()
+          PY
+          )
+          set +e
+          POS_ENVIRONMENT=production \
+          POS_LISTEN_ADDRESS="127.0.0.1:$port" \
+          POS_SQLITE_PATH="$db" \
+          POS_LOCAL_API_TOKEN=production-local-token-strong-value \
+          POS_LOCAL_TOKEN_FILE="$token" \
+          POS_BACKUP_DIRECTORY="$backups" \
+          POS_OFFLINE_GRANT_PUBLIC_KEY= \
+          POS_CENTRAL_API_URL= \
+          POS_SYNC_TENANT_ID= \
+          POS_SYNC_TOKEN= \
+          POS_DEVICE_ID= \
+          POS_INSTALLATION_ID= \
+          POS_STORE_ID= \
+          POS_STORE_NUMBER= \
+          POS_NO= \
+          POS_TOUCHPOINT_ID= \
+          POS_TERMINAL_ID= \
+          ./posservice >"$tmp/runtime.log" 2>&1
+          rc=$?
+          set -e
+          cat "$tmp/runtime.log"
+          if [ "$rc" -eq 0 ]; then echo "expected startup failure"; exit 1; fi
+          grep -q 'POS_OFFLINE_GRANT_PUBLIC_KEY is required in production' "$tmp/runtime.log"
+          python3 - "$port" <<'PY'
+          import socket,sys
+          p=int(sys.argv[1]); s=socket.socket(); s.settimeout(0.3)
+          try:
+              s.connect(('127.0.0.1',p)); reachable=True
+          except OSError:
+              reachable=False
+          finally:
+              s.close()
+          print(f'LISTENER_REACHABLE={str(reachable).lower()}')
+          if reachable: raise SystemExit(1)
+          PY
+          test ! -e "$db"
+          test ! -e "$token"
+          echo "EXIT_CODE=$rc"
+          echo "DB_EXISTS=false"
+          echo "TOKEN_FILE_EXISTS=false"
+          echo "RUNTIME_PASS=true"
