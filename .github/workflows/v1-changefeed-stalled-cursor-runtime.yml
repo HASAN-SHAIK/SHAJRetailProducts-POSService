@@ -1,0 +1,208 @@
+name: V1 stalled change-feed cursor runtime certification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'internal/**'
+      - 'cmd/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/v1-changefeed-stalled-cursor-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact PR merge
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+
+      - name: Focused stalled-cursor acceptance
+        run: go test ./internal/changefeed -run '^TestPullUntilCaughtUpBoundsRepeatedHasMoreWithUnchangedCursor$' -count=1 -v
+
+      - name: Full POS suite
+        run: go test ./...
+
+      - name: Vet and build runnable
+        run: |
+          go vet ./...
+          go build -o "$RUNNER_TEMP/posservice" ./cmd/posservice
+
+      - name: Real POSService stalled-cursor runtime probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/v1-stalled-cursor"
+          mkdir -p "$ROOT"
+          DB="$ROOT/pos.db"
+          MOCK_LOG="$ROOT/mock.log"
+          POS_LOG="$ROOT/pos.log"
+
+          cat > "$ROOT/mock_central.py" <<'PY'
+          import json, sys
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+          log_path = sys.argv[1]
+          change = {
+              "cursor": "cursor-stalled",
+              "has_more": True,
+              "changes": [{
+                  "id": "product:stall:v1",
+                  "type": "catalog.product.upsert",
+                  "schema_version": 1,
+                  "source": "central",
+                  "payload": {
+                      "id": "stall-product",
+                      "name": "Stall Product",
+                      "is_active": True,
+                      "allow_manual_price": False,
+                      "track_inventory": True,
+                      "version": 1
+                  }
+              }]
+          }
+
+          class Handler(BaseHTTPRequestHandler):
+              def log_message(self, fmt, *args):
+                  pass
+              def _record(self):
+                  with open(log_path, "a", encoding="utf-8") as f:
+                      f.write(self.command + " " + self.path + "\n")
+              def do_GET(self):
+                  self._record()
+                  if self.path.startswith("/api/v1/sync/changes"):
+                      body = json.dumps(change).encode()
+                      self.send_response(200)
+                      self.send_header("Content-Type", "application/json")
+                      self.send_header("Content-Length", str(len(body)))
+                      self.end_headers()
+                      self.wfile.write(body)
+                      return
+                  body = b'{}'
+                  self.send_response(200)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+              def do_POST(self):
+                  self._record()
+                  length = int(self.headers.get("Content-Length", "0"))
+                  if length:
+                      self.rfile.read(length)
+                  body = b'{"accepted":true}'
+                  self.send_response(200)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+
+          ThreadingHTTPServer(("127.0.0.1", 18080), Handler).serve_forever()
+          PY
+
+          python3 "$ROOT/mock_central.py" "$MOCK_LOG" &
+          MOCK_PID=$!
+          POS_PID=""
+          cleanup() {
+            if [ -n "${POS_PID:-}" ]; then kill "$POS_PID" 2>/dev/null || true; fi
+            if [ -n "${MOCK_PID:-}" ]; then kill "$MOCK_PID" 2>/dev/null || true; fi
+          }
+          trap cleanup EXIT
+          for _ in $(seq 1 50); do
+            if curl -fsS http://127.0.0.1:18080/health >/dev/null 2>&1; then
+              break
+            fi
+            if ! kill -0 "$MOCK_PID" 2>/dev/null; then
+              exit 1
+            fi
+            sleep 0.1
+          done
+          curl -fsS http://127.0.0.1:18080/health >/dev/null
+
+          export POS_ENVIRONMENT=test
+          export POS_LISTEN_ADDRESS=127.0.0.1:4787
+          export POS_SQLITE_PATH="$DB"
+          export POS_LOCAL_API_TOKEN=local-runtime-token-0123456789abcdef
+          export POS_LOCAL_TOKEN_FILE="$ROOT/local.token"
+          export POS_DEVICE_ID=dev-stall
+          export POS_INSTALLATION_ID=install-stall
+          export POS_CENTRAL_API_URL=http://127.0.0.1:18080
+          export POS_SYNC_TENANT_ID=tenant-stall
+          export POS_SYNC_TOKEN=secret-stall
+          export POS_SYNC_INTERVAL=30s
+          export POS_SYNC_REQUEST_TIMEOUT=2s
+          export POS_BACKUP_DIRECTORY="$ROOT/backups"
+          export POS_BACKUP_INTERVAL=1h
+          export POS_OBSERVABILITY_INTERVAL=1h
+
+          "$RUNNER_TEMP/posservice" >"$POS_LOG" 2>&1 &
+          POS_PID=$!
+
+          for _ in $(seq 1 80); do
+            if curl -fsS http://127.0.0.1:4787/api/v1/health >/dev/null 2>&1; then
+              break
+            fi
+            if ! kill -0 "$POS_PID" 2>/dev/null; then
+              cat "$POS_LOG"
+              exit 1
+            fi
+            sleep 0.1
+          done
+          curl -fsS http://127.0.0.1:4787/api/v1/health
+
+          python3 - "$DB" "$MOCK_LOG" <<'PY'
+          import sqlite3, sys, time
+          db_path, log_path = sys.argv[1], sys.argv[2]
+          deadline = time.time() + 8
+          while time.time() < deadline:
+              try:
+                  con = sqlite3.connect(db_path)
+                  cur = con.cursor()
+                  cursor = cur.execute("SELECT cursor_value FROM sync_checkpoints WHERE stream_name='central_changes'").fetchone()
+                  applied = cur.execute("SELECT COUNT(*) FROM inbox_messages WHERE message_id='product:stall:v1' AND status='applied'").fetchone()[0]
+                  products = cur.execute("SELECT COUNT(*) FROM catalog_products WHERE id='stall-product' AND name='Stall Product'").fetchone()[0]
+                  con.close()
+                  if cursor and cursor[0] == 'cursor-stalled' and applied == 1 and products == 1:
+                      break
+              except sqlite3.Error:
+                  pass
+              time.sleep(0.1)
+          else:
+              if 'con' in locals():
+                  con.close()
+              print(open(log_path, encoding='utf-8').read() if __import__('os').path.exists(log_path) else 'NO_MOCK_LOG')
+              raise SystemExit("runtime state did not converge to stalled cursor exactly-once projection")
+
+          with open(log_path, encoding="utf-8") as f:
+              changes = [line.strip() for line in f if line.startswith("GET /api/v1/sync/changes")]
+          print("RUNTIME_CHANGE_REQUEST_COUNT=" + str(len(changes)))
+          print("RUNTIME_CURSOR=" + cursor[0])
+          print("RUNTIME_APPLIED_INBOX=" + str(applied))
+          print("RUNTIME_PRODUCT_ROWS=" + str(products))
+          if len(changes) != 10:
+              raise SystemExit(f"expected exactly 10 initial catch-up requests before 30s poll sleep, got {len(changes)}")
+          PY
+
+          kill "$POS_PID"
+          wait "$POS_PID" || true
+          POS_PID=""
+          grep -q 'starting POS service' "$POS_LOG"
+          grep -q 'local device identity ready' "$POS_LOG"
+          echo 'REAL_POS_SERVICE_STALLED_CURSOR_RUNTIME=PASS'
+
+      - name: Record exact-head evidence
+        if: always()
+        run: |
+          echo "GITHUB_SHA=$GITHUB_SHA"
+          echo "GITHUB_HEAD_REF=$GITHUB_HEAD_REF"
+          echo "GITHUB_BASE_REF=$GITHUB_BASE_REF"
