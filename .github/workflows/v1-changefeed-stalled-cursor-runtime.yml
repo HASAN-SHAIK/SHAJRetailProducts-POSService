@@ -117,7 +117,7 @@ jobs:
           export POS_ENVIRONMENT=test
           export POS_LISTEN_ADDRESS=127.0.0.1:4787
           export POS_SQLITE_PATH="$DB"
-          export POS_LOCAL_API_TOKEN=local-runtime-token
+          export POS_LOCAL_API_TOKEN=local-runtime-token-0123456789abcdef
           export POS_LOCAL_TOKEN_FILE="$ROOT/local.token"
           export POS_DEVICE_ID=dev-stall
           export POS_INSTALLATION_ID=install-stall
