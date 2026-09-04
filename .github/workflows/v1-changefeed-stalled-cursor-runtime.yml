@@ -112,7 +112,12 @@ jobs:
 
           python3 "$ROOT/mock_central.py" "$MOCK_LOG" &
           MOCK_PID=$!
-          trap 'kill ${POS_PID:-0} ${MOCK_PID:-0} 2>/dev/null || true' EXIT
+          POS_PID=""
+          cleanup() {
+            if [ -n "${POS_PID:-}" ]; then kill "$POS_PID" 2>/dev/null || true; fi
+            if [ -n "${MOCK_PID:-}" ]; then kill "$MOCK_PID" 2>/dev/null || true; fi
+          }
+          trap cleanup EXIT
           for _ in $(seq 1 50); do
             if curl -fsS http://127.0.0.1:18080/health >/dev/null 2>&1; then
               break
@@ -190,7 +195,7 @@ jobs:
 
           kill "$POS_PID"
           wait "$POS_PID" || true
-          POS_PID=0
+          POS_PID=""
           grep -q 'starting POS service' "$POS_LOG"
           grep -q 'local device identity ready' "$POS_LOG"
           echo 'REAL_POS_SERVICE_STALLED_CURSOR_RUNTIME=PASS'
