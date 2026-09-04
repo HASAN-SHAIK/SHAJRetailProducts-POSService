@@ -113,6 +113,16 @@ jobs:
           python3 "$ROOT/mock_central.py" "$MOCK_LOG" &
           MOCK_PID=$!
           trap 'kill ${POS_PID:-0} ${MOCK_PID:-0} 2>/dev/null || true' EXIT
+          for _ in $(seq 1 50); do
+            if curl -fsS http://127.0.0.1:18080/health >/dev/null 2>&1; then
+              break
+            fi
+            if ! kill -0 "$MOCK_PID" 2>/dev/null; then
+              exit 1
+            fi
+            sleep 0.1
+          done
+          curl -fsS http://127.0.0.1:18080/health >/dev/null
 
           export POS_ENVIRONMENT=test
           export POS_LISTEN_ADDRESS=127.0.0.1:4787
@@ -163,6 +173,9 @@ jobs:
                   pass
               time.sleep(0.1)
           else:
+              if 'con' in locals():
+                  con.close()
+              print(open(log_path, encoding='utf-8').read() if __import__('os').path.exists(log_path) else 'NO_MOCK_LOG')
               raise SystemExit("runtime state did not converge to stalled cursor exactly-once projection")
 
           with open(log_path, encoding="utf-8") as f:
