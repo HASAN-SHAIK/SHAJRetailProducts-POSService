@@ -1,0 +1,33 @@
+name: V1 GST Disabled Runtime
+
+on:
+  pull_request:
+    paths:
+      - 'internal/server/gst_disabled_live_runtime_test.go'
+      - '.github/workflows/v1-gst-disabled-runtime.yml'
+  workflow_dispatch:
+
+jobs:
+  gst-disabled-runtime:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Focused GST-disabled live HTTP acceptance
+        run: go test ./internal/server -run '^TestGSTDisabledOverridesCallerTaxOverLiveHTTP$' -count=1 -v
+      - name: Complete POSService suite
+        run: go test ./...
+      - name: Vet POSService
+        run: go vet ./...
+      - name: Build real POSService runnable
+        run: go build -o "$RUNNER_TEMP/posservice" ./cmd/posservice
+      - name: Certification summary
+        run: |
+          echo 'GST_DISABLED_FOCUSED=success'
+          echo 'GST_DISABLED_SUITE=success'
+          echo 'GST_DISABLED_VET=success'
+          echo 'GST_DISABLED_BUILD=success'
+          echo 'GST_DISABLED_RUNTIME=success'
