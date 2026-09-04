@@ -1,0 +1,35 @@
+name: V1 backup restore runtime certification
+
+on:
+  pull_request:
+    paths:
+      - 'internal/**'
+      - 'cmd/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/v1-backup-restore-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup-restore-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+      - name: Focused verified backup restore runtime
+        run: go test ./internal/server -run '^TestVerifiedBackupRestoresIntoLivePOSService$' -count=1 -v
+      - name: Full POS suite
+        run: go test ./...
+      - name: Vet POS service
+        run: go vet ./...
+      - name: Build POSService runnable
+        run: go build ./cmd/posservice
