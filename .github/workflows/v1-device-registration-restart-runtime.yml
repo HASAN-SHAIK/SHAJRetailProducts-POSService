@@ -1,0 +1,37 @@
+name: V1 device registration restart runtime
+
+on:
+  pull_request:
+    paths:
+      - 'internal/**'
+      - 'cmd/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/v1-device-registration-restart-runtime.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+
+      - name: Focused live restart verification
+        run: go test ./internal/server -run '^TestRegisteredDeviceIdentitySurvivesLivePOSServiceRestart$' -count=1 -v
+
+      - name: Full POS suite
+        run: go test ./...
+
+      - name: Vet POS service
+        run: go vet ./...
+
+      - name: Build runnable POS service
+        run: go build ./cmd/posservice
