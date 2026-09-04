@@ -21,6 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Exact-head assertion
@@ -52,7 +53,7 @@ jobs:
           POS_LOG="$RUNTIME/pos.log"
 
           cat > "$RUNTIME/central.py" <<'PY'
-          import json, os, socketserver
+          import json, os
           from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
           accepted=set()
@@ -89,7 +90,6 @@ jobs:
                   self.end_headers(); self.wfile.write(payload)
                   self._record(f"DUP_ACK key={key}")
               def do_GET(self):
-                  # Keep unrelated Central polling benign while this scenario targets outbound sync.
                   payload=b'{"changes":[],"next_cursor":"","has_more":false}'
                   self.send_response(200)
                   self.send_header('Content-Type','application/json')
