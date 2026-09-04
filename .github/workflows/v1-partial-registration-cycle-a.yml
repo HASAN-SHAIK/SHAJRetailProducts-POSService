@@ -1,0 +1,25 @@
+name: V1 Partial Registration Runtime Cycle A
+
+on:
+  pull_request:
+    paths:
+      - 'cmd/posservice/startup_registration_v1_test.go'
+      - '.github/workflows/v1-partial-registration-cycle-a.yml'
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Focused real POSService partial-registration runtime
+        run: go test ./cmd/posservice -run '^TestV1PartialConfiguredRegistrationFailsClosedBeforeListener$' -count=1 -v
+      - name: Full POSService test suite
+        run: go test ./...
+      - name: Go vet
+        run: go vet ./...
+      - name: Build real POSService runnable
+        run: go build ./cmd/posservice
