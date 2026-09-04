@@ -1,0 +1,29 @@
+name: V1 Placeholder Sync Token Runtime
+
+on:
+  pull_request:
+    paths:
+      - 'cmd/posservice/**'
+      - '.github/workflows/v1-placeholder-sync-token-cycle-a.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+      - name: Focused production placeholder sync-token runtime
+        run: go test ./cmd/posservice -run '^TestV1ProductionPlaceholderSyncTokenPreventsPOSServiceStartup$' -count=1 -v
+      - name: Relevant POSService suite
+        run: go test ./...
+      - name: Vet POSService
+        run: go vet ./...
+      - name: Build real POSService runnable
+        run: go build ./cmd/posservice
