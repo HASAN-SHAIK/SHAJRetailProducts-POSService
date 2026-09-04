@@ -1,0 +1,71 @@
+name: V1 Non-loopback Runtime Cycle 94
+
+on:
+  push:
+    branches:
+      - test/v1-non-loopback-runtime-cycle94
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: Focused non-loopback acceptance
+        run: go test ./cmd/posservice -run TestV1NonLoopbackListenAddressPreventsPOSServiceStartup -count=1 -v
+      - name: Full POS suite
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build real POSService
+        run: go build -o ./posservice ./cmd/posservice
+      - name: Real runtime fail-closed probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+          db="$tmp/non-loopback.db"
+          token="$tmp/local-token"
+          set +e
+          POS_ENVIRONMENT=development \
+          POS_LISTEN_ADDRESS="0.0.0.0:${port}" \
+          POS_SQLITE_PATH="$db" \
+          POS_LOCAL_API_TOKEN=test-local-token \
+          POS_LOCAL_TOKEN_FILE="$token" \
+          POS_BACKUP_DIRECTORY="$tmp/backups" \
+          POS_CENTRAL_API_URL= \
+          POS_SYNC_TENANT_ID= \
+          POS_SYNC_TOKEN= \
+          POS_STORE_ID= \
+          POS_STORE_NUMBER= \
+          POS_NO= \
+          POS_TOUCHPOINT_ID= \
+          POS_TERMINAL_ID= \
+          ./posservice >"$tmp/runtime.log" 2>&1
+          code=$?
+          set -e
+          cat "$tmp/runtime.log"
+          reachable=false
+          if (echo > /dev/tcp/127.0.0.1/${port}) 2>/dev/null; then reachable=true; fi
+          echo "EXIT_CODE=$code"
+          echo "LISTENER_REACHABLE=$reachable"
+          if [ -e "$db" ]; then db_exists=true; else db_exists=false; fi
+          if [ -e "$token" ]; then token_exists=true; else token_exists=false; fi
+          echo "DB_EXISTS=$db_exists"
+          echo "TOKEN_FILE_EXISTS=$token_exists"
+          grep -q "invalid configuration" "$tmp/runtime.log"
+          grep -q "POS_LISTEN_ADDRESS must bind to loopback only" "$tmp/runtime.log"
+          test "$code" -ne 0
+          test "$reachable" = false
+          test "$db_exists" = false
+          test "$token_exists" = false
+          echo "RUNTIME_PASS=true"
