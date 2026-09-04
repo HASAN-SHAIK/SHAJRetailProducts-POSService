@@ -20,6 +20,8 @@ jobs:
         with:
           go-version: '1.23.x'
           cache: true
+      - name: Focused V1 startup health and readiness
+        run: go test ./internal/server -run '^(TestV1HealthEndpointReportsRunningPOSService|TestV1ReadyEndpointRequiresDatabaseAndDeviceIdentity|TestV1ReadyEndpointFailsClosedWhenSQLiteIsUnavailable)$' -count=1 -v
       - name: Test all POS packages
         run: go test ./...
       - name: Real POSService startup and restart smoke
