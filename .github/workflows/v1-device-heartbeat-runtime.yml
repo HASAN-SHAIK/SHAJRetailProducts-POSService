@@ -1,0 +1,27 @@
+name: V1 Device Heartbeat Runtime
+
+on:
+  pull_request:
+    paths:
+      - 'internal/server/device_heartbeat_runtime_test.go'
+      - '.github/workflows/v1-device-heartbeat-runtime.yml'
+  workflow_dispatch:
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Focused live HTTP + SQLite heartbeat verification
+        run: go test ./internal/server -run '^TestDeviceHeartbeatPersistsOverLiveHTTPServer$' -count=1 -v
+      - name: Full POSService suite
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build runnable
+        run: go build ./cmd/posservice
