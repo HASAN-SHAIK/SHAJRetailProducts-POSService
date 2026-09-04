@@ -144,8 +144,8 @@ func TestPrimaryBarcodeReplacementUpdatesLiveCatalogHTTP(t *testing.T) {
 		t.Fatalf("decode product readback: %v", err)
 	}
 	_ = productResp.Body.Close()
-	if len(product.Barcodes) != 1 || product.Barcodes[0].Barcode != "8901234567891" || !product.Barcodes[0].IsPrimary {
-		t.Fatalf("live product retained stale/invalid primary barcode set: %+v", product.Barcodes)
+	if len(product.Barcodes) != 1 || product.Barcodes[0] != "8901234567891" {
+		t.Fatalf("live product retained stale/invalid barcode set: %+v", product.Barcodes)
 	}
 
 	var oldCount, newCount, totalPrimary int
