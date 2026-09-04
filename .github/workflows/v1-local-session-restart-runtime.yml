@@ -1,0 +1,35 @@
+name: V1 Local Session Restart Runtime
+
+on:
+  push:
+    branches:
+      - test/v1-local-session-restart-cycle95
+  pull_request:
+    paths:
+      - 'internal/server/auth_session_restart_runtime_test.go'
+      - '.github/workflows/v1-local-session-restart-runtime.yml'
+
+jobs:
+  session-restart:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Focused live session restart acceptance
+        run: go test ./internal/server -run '^TestV1LocalSessionSurvivesLivePOSServiceRestartAndLogoutPersists$' -count=1 -v
+      - name: Complete POSService suite
+        run: go test ./...
+      - name: Vet POSService
+        run: go vet ./...
+      - name: Build real POSService runnable
+        run: go build -o "$RUNNER_TEMP/posservice" ./cmd/posservice
+      - name: Certification summary
+        run: |
+          echo 'SESSION_RESTART_FOCUSED=success'
+          echo 'SESSION_RESTART_SUITE=success'
+          echo 'SESSION_RESTART_VET=success'
+          echo 'SESSION_RESTART_BUILD=success'
+          echo 'SESSION_RESTART_RUNTIME=success'
