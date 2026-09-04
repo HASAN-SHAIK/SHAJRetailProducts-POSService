@@ -1,0 +1,30 @@
+name: V1 Request Correlation Runtime
+
+on:
+  pull_request:
+    paths:
+      - 'internal/server/request_correlation_live_runtime_test.go'
+      - '.github/workflows/v1-request-correlation-runtime.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - name: Focused live request-correlation acceptance
+        run: go test ./internal/server -run '^TestV1RequestCorrelationRunsAcrossLivePOSServiceHTTPBoundary$' -count=1 -v
+      - name: Full POSService suite
+        if: always()
+        run: go test ./...
+      - name: Vet POSService
+        if: always()
+        run: go vet ./...
+      - name: Build POSService runnable
+        if: always()
+        run: go build ./cmd/posservice
