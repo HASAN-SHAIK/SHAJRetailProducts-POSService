@@ -1,0 +1,28 @@
+name: V1 offline sale restart certification
+
+on:
+  pull_request:
+    paths:
+      - 'internal/server/offline_sale_restart_runtime_test.go'
+      - '.github/workflows/v1-offline-sale-restart-cert.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+      - name: Focused real HTTP + SQLite restart acceptance
+        run: go test ./internal/server -run '^TestOfflineCompletedSaleSurvivesLivePOSServiceRestart$' -count=1 -v
+      - name: Complete POSService suite
+        run: go test ./...
+      - name: Vet POSService
+        run: go vet ./...
+      - name: Build runnable POSService
+        run: go build -o "$RUNNER_TEMP/posservice" ./cmd/posservice
