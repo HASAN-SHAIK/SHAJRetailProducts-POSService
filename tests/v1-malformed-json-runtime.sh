@@ -5,11 +5,12 @@ bin=${1:?usage: v1-malformed-json-runtime.sh /path/to/posservice}
 work=/tmp/shaj-cycle-c-malformed-json
 rm -rf "$work"
 mkdir -p "$work/state" "$work/backups"
+local_token=cycle-c-malformed-json-token-1234567890abcdef
 
 export POS_ENVIRONMENT=development
 export POS_LISTEN_ADDRESS=127.0.0.1:4803
 export POS_SQLITE_PATH="$work/state/pos.db"
-export POS_LOCAL_API_TOKEN=cycle-c-malformed-json-token-1234567890abcdef
+export POS_LOCAL_API_TOKEN="$local_token"
 export POS_LOCAL_TOKEN_FILE="$work/pos.token"
 export POS_ALLOWED_ORIGINS=http://127.0.0.1:5173
 export POS_CENTRAL_API_URL=
@@ -45,7 +46,8 @@ status=$(curl --silent --show-error --max-time 5 \
   --output "$work/malformed-response.json" \
   --write-out '%{http_code}' \
   -H 'Content-Type: application/json' \
-  --data-binary '{"username":"cycle-c","password":' \
+  -H "X-POS-Local-Token: $local_token" \
+  --data-binary '{"user_id":"cycle-c","pin":' \
   http://127.0.0.1:4803/api/v1/auth/login || true)
 
 echo "MALFORMED_JSON_RESPONSE_STATUS=$status"
