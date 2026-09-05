@@ -1,0 +1,88 @@
+name: V1 Corrupt SQLite Startup Cycle C
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Assert exact head
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          echo "EXACT_HEAD=$(git rev-parse HEAD)"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Focused corrupted SQLite acceptance
+        run: go test ./internal/database -run '^TestOpenRejectsCorruptedSQLiteFile$' -count=1 -v
+
+      - name: Complete Go suite
+        run: go test ./...
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Build runnable POSService
+        run: go build -o /tmp/posservice-cycle-c ./cmd/posservice
+
+      - name: Real process corrupted SQLite startup verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=/tmp/shaj-cycle-c-corrupt-sqlite
+          rm -rf "$work"
+          mkdir -p "$work/backups"
+          printf 'SHAJ-cycle-c-not-a-sqlite-database\ncorrupt-runtime-payload\n' > "$work/pos.db"
+
+          export POS_ENVIRONMENT=development
+          export POS_LISTEN_ADDRESS=127.0.0.1:4799
+          export POS_SQLITE_PATH="$work/pos.db"
+          export POS_LOCAL_API_TOKEN=cycle-c-corrupt-db-token-1234567890abcdef
+          export POS_LOCAL_TOKEN_FILE="$work/pos.token"
+          export POS_ALLOWED_ORIGINS=http://127.0.0.1:5173
+          export POS_CENTRAL_API_URL=
+          export POS_BACKUP_DIRECTORY="$work/backups"
+          export POS_BACKUP_INTERVAL=6h
+          export POS_BACKUP_RETENTION=2
+          export POS_OBSERVABILITY_INTERVAL=30s
+
+          set +e
+          timeout 8s /tmp/posservice-cycle-c > "$work/runtime.log" 2>&1
+          rc=$?
+          set -e
+
+          echo "CORRUPT_SQLITE_PROCESS_EXIT_CODE=$rc"
+          cat "$work/runtime.log"
+
+          test "$rc" -ne 0
+          test "$rc" -ne 124
+          grep -Eq 'open local database|apply local database migrations|local database integrity check failed' "$work/runtime.log"
+
+          if curl --silent --fail --max-time 1 http://127.0.0.1:4799/api/v1/health >/dev/null 2>&1; then
+            echo 'CORRUPT_SQLITE_HEALTH_REACHABLE=true'
+            exit 1
+          fi
+
+          test "$(cat "$work/pos.db")" = $'SHAJ-cycle-c-not-a-sqlite-database\ncorrupt-runtime-payload'
+          echo 'CORRUPT_SQLITE_HEALTH_REACHABLE=false'
+          echo 'CORRUPT_SQLITE_ORIGINAL_BYTES_PRESERVED=true'
+          echo 'CORRUPT_SQLITE_STARTUP_FAIL_CLOSED=true'
