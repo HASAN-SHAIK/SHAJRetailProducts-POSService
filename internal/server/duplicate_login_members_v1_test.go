@@ -24,7 +24,7 @@ func TestLocalAuthLoginRejectsDuplicateJSONMembers(t *testing.T) {
 	}
 
 	s := &Server{localAuth: localauth.New(db, "")}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"user_id":"missing-cycle-c","pin":"1111","pin":"2222"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader("{\"user_id\":\"missing-cycle-c\",\"pin\":\"1111\",\"pin\":\"2222\"}"))
 	rec := httptest.NewRecorder()
 
 	s.handleLocalAuthLogin(rec, req)
@@ -32,7 +32,7 @@ func TestLocalAuthLoginRejectsDuplicateJSONMembers(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected duplicate login members to be rejected with 400, got status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), `"invalid_auth_payload"`) {
+	if !strings.Contains(rec.Body.String(), "\"invalid_auth_payload\"") {
 		t.Fatalf("expected invalid_auth_payload, got %s", rec.Body.String())
 	}
 }
