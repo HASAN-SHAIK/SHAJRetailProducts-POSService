@@ -12,8 +12,11 @@ CENTRAL_LOG="$ROOT/central.log"
 POS1_LOG="$ROOT/pos-phase1.log"
 POS2_LOG="$ROOT/pos-phase2.log"
 LOCAL_TOKEN="cycle-c-customer-local-token-1234567890abcdef"
+PRIVATE_KEY="$ROOT/offline-private.pem"
+PUBLIC_KEY_FILE="$ROOT/offline-public.pem"
 CENTRAL_PID=""
 POS_PID=""
+SESSION_TOKEN=""
 
 cleanup() {
   set +e
@@ -22,6 +25,40 @@ cleanup() {
   rm -rf "$ROOT"
 }
 trap cleanup EXIT
+
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$PRIVATE_KEY" >/dev/null 2>&1
+openssl pkey -in "$PRIVATE_KEY" -pubout -out "$PUBLIC_KEY_FILE" >/dev/null 2>&1
+PUBLIC_KEY="$(cat "$PUBLIC_KEY_FILE")"
+
+b64url() {
+  python3 -c 'import base64,sys; print(base64.urlsafe_b64encode(sys.stdin.buffer.read()).decode().rstrip("="))'
+}
+
+make_offline_grant() {
+  local header payload unsigned signature
+  header="$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | b64url)"
+  payload="$(python3 - <<'PY' | b64url
+import json,time
+print(json.dumps({
+  "type":"pos_offline_grant",
+  "user_id":"cycle-c-customer-user",
+  "tenant_id":"tenant-customer-restart",
+  "role":"admin",
+  "device_id":"device-customer-restart",
+  "branch_id":"store-customer-restart",
+  "all_branch_access":True,
+  "permissions":["*"],
+  "grant_id":"grant-cycle-c-customer-restart",
+  "iss":"shajtech-central",
+  "aud":"shajtech-pos-edge",
+  "exp":int(time.time())+3600
+}, separators=(",",":")))
+PY
+)"
+  unsigned="$header.$payload"
+  signature="$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign "$PRIVATE_KEY" | b64url)"
+  printf '%s.%s' "$unsigned" "$signature"
+}
 
 echo 1 > "$PHASE"
 : > "$REQUEST_LOG"
@@ -44,8 +81,14 @@ start_pos() {
     POS_SYNC_TOKEN="sync-token-customer-restart-valid" \
     POS_DEVICE_ID="device-customer-restart" \
     POS_INSTALLATION_ID="installation-customer-restart" \
+    POS_STORE_ID="store-customer-restart" \
+    POS_STORE_NUMBER="STORE-CYCLE-C" \
+    POS_NO="POS-CYCLE-C" \
+    POS_TOUCHPOINT_ID="TP-CYCLE-C" \
+    POS_TERMINAL_ID="TERM-CYCLE-C" \
     POS_LOCAL_API_TOKEN="$LOCAL_TOKEN" \
     POS_LOCAL_TOKEN_FILE="$ROOT/local.token" \
+    POS_OFFLINE_GRANT_PUBLIC_KEY="$PUBLIC_KEY" \
     POS_SYNC_INTERVAL=200ms \
     POS_SYNC_REQUEST_TIMEOUT=1s \
     POS_BACKUP_INTERVAL=24h \
@@ -68,6 +111,26 @@ start_pos() {
   return 1
 }
 
+establish_local_session() {
+  local grant enroll_status login_status
+  grant="$(make_offline_grant)"
+  enroll_status="$(curl -sS -o "$ROOT/enroll.json" -w '%{http_code}' -X POST "http://127.0.0.1:$POS_PORT/api/v1/auth/enroll" \
+    -H "Content-Type: application/json" \
+    -H "X-POS-Local-Token: $LOCAL_TOKEN" \
+    --data "$(python3 -c 'import json,sys; print(json.dumps({"offline_grant":sys.argv[1],"pin":"2468"}))' "$grant")")"
+  test "$enroll_status" = "200" || { echo "enroll status=$enroll_status body=$(cat "$ROOT/enroll.json")" >&2; return 1; }
+
+  login_status="$(curl -sS -o "$ROOT/login.json" -w '%{http_code}' -X POST "http://127.0.0.1:$POS_PORT/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -H "X-POS-Local-Token: $LOCAL_TOKEN" \
+    --data '{"user_id":"cycle-c-customer-user","pin":"2468"}')"
+  test "$login_status" = "200" || { echo "login status=$login_status body=$(cat "$ROOT/login.json")" >&2; return 1; }
+  SESSION_TOKEN="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["session_token"])' "$ROOT/login.json")"
+  test -n "$SESSION_TOKEN"
+  echo "CUSTOMER_RESTART_ENROLL_HTTP=$enroll_status"
+  echo "CUSTOMER_RESTART_LOGIN_HTTP=$login_status"
+}
+
 customer_state() {
   python3 - "$DB" <<'PY'
 import sqlite3, sys
@@ -84,27 +147,34 @@ PY
 }
 
 start_pos "$POS1_LOG"
+establish_local_session
 
-CREATE_JSON="$(curl -fsS -X POST "http://127.0.0.1:$POS_PORT/api/v1/customers" \
+CREATE_STATUS="$(curl -sS -o "$ROOT/create.json" -w '%{http_code}' -X POST "http://127.0.0.1:$POS_PORT/api/v1/customers" \
   -H "Content-Type: application/json" \
   -H "X-POS-Local-Token: $LOCAL_TOKEN" \
+  -H "X-POS-Session-Token: $SESSION_TOKEN" \
   --data '{"customer_code":"CYCLE-C-001","name":"Restart Customer V1","phone":"9876543210","email":"restart-v1@example.test","credit_limit_minor":250000,"currency":"INR"}')"
-CUSTOMER_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"$CREATE_JSON")"
+test "$CREATE_STATUS" = "201" || { echo "create status=$CREATE_STATUS body=$(cat "$ROOT/create.json")" >&2; exit 1; }
+CUSTOMER_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$ROOT/create.json")"
 test -n "$CUSTOMER_ID"
 
 UPDATE_STATUS="$(curl -sS -o "$ROOT/update.json" -w '%{http_code}' -X PUT "http://127.0.0.1:$POS_PORT/api/v1/customers/$CUSTOMER_ID" \
   -H "Content-Type: application/json" \
   -H "X-POS-Local-Token: $LOCAL_TOKEN" \
+  -H "X-POS-Session-Token: $SESSION_TOKEN" \
   --data '{"customer_code":"CYCLE-C-001","name":"Restart Customer V2","phone":"9876543210","email":"restart-v2@example.test","credit_limit_minor":300000,"currency":"INR"}')"
-test "$UPDATE_STATUS" = "200"
+test "$UPDATE_STATUS" = "200" || { echo "update status=$UPDATE_STATUS body=$(cat "$ROOT/update.json")" >&2; exit 1; }
 
 for _ in $(seq 1 100); do
   STATE="$(customer_state 2>/dev/null || true)"
-  if [[ "$STATE" == "$CUSTOMER_ID|Restart Customer V2|2|pending|2|0|1,2" ]]; then break; fi
+  if [[ "$STATE" == "$CUSTOMER_ID|Restart Customer V2|2|pending|2|0|1,2" || "$STATE" == "$CUSTOMER_ID|Restart Customer V2|2|pending|2|0|1,2" ]]; then break; fi
   sleep 0.05
 done
 BEFORE_RESTART="$(customer_state)"
-test "$BEFORE_RESTART" = "$CUSTOMER_ID|Restart Customer V2|2|pending|2|0|1,2"
+case "$BEFORE_RESTART" in
+  "$CUSTOMER_ID|Restart Customer V2|2|pending|2|0|1,2"|"$CUSTOMER_ID|Restart Customer V2|2|pending|2|0|1,2") ;;
+  *) echo "unexpected pre-restart state=$BEFORE_RESTART" >&2; exit 1 ;;
+esac
 FIRST_HEALTH="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$POS_PORT/api/v1/health")"
 
 kill -TERM "$POS_PID"
@@ -120,7 +190,13 @@ start_pos "$POS2_LOG"
 
 for _ in $(seq 1 250); do
   STATE="$(customer_state 2>/dev/null || true)"
-  if [[ "$STATE" == "$CUSTOMER_ID|Restart Customer V2|2|pending|2|2|1,2" || "$STATE" == "$CUSTOMER_ID|Restart Customer V2|2|synced|2|2|1,2" ]]; then break; fi
+  PUBLISHED="$(python3 - "$DB" "$CUSTOMER_ID" <<'PY' 2>/dev/null || true
+import sqlite3,sys
+con=sqlite3.connect(sys.argv[1])
+print(con.execute("SELECT COUNT(*) FROM outbox_events WHERE aggregate_type='customer' AND aggregate_id=? AND event_type='customer.changed' AND status='published'", (sys.argv[2],)).fetchone()[0])
+PY
+)"
+  if [[ "$PUBLISHED" = "2" ]]; then break; fi
   sleep 0.1
 done
 FINAL_STATE="$(customer_state)"
@@ -157,7 +233,7 @@ PY
 SECOND_HEALTH="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$POS_PORT/api/v1/health")"
 kill -0 "$POS_PID"
 
-echo "CUSTOMER_RESTART_CREATE_HTTP=201"
+echo "CUSTOMER_RESTART_CREATE_HTTP=$CREATE_STATUS"
 echo "CUSTOMER_RESTART_UPDATE_HTTP=$UPDATE_STATUS"
 echo "CUSTOMER_RESTART_FIRST_HEALTH=$FIRST_HEALTH"
 echo "CUSTOMER_RESTART_BEFORE=$BEFORE_RESTART"
