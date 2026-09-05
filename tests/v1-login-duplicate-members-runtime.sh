@@ -44,7 +44,7 @@ if [[ "$ready" != true ]]; then
   exit 2
 fi
 
-payload='{"user_id":"missing-cycle-c","pin":"1111","pin":"2222"}'
+payload=$(printf '\173\042user_id\042\072\042missing-cycle-c\042\054\042pin\042\072\0421111\042\054\042pin\042\072\0422222\042\175')
 status=$(curl --silent --show-error --max-time 5 \
   --output "$work/response.json" \
   --write-out '%{http_code}' \
