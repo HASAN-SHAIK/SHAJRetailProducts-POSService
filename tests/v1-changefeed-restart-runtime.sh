@@ -59,7 +59,7 @@ start_pos() {
       cat "$logfile" >&2
       return 1
     fi
-    if curl -fsS "http://127.0.0.1:$POS_PORT/health" >/dev/null 2>&1; then return 0; fi
+    if curl -fsS "http://127.0.0.1:$POS_PORT/api/v1/health" >/dev/null 2>&1; then return 0; fi
     sleep 0.1
   done
   echo "POS did not become healthy" >&2
@@ -99,7 +99,7 @@ wait_state() {
 
 start_pos "$POS1_LOG"
 wait_state "cursor-1|Restart Milk V1|1|1|0"
-FIRST_HEALTH="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$POS_PORT/health")"
+FIRST_HEALTH="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$POS_PORT/api/v1/health")"
 FIRST_STATE="$(state)"
 
 kill -TERM "$POS_PID"
@@ -112,7 +112,7 @@ RETAINED_STATE="$(state)"
 echo 2 > "$PHASE"
 start_pos "$POS2_LOG"
 wait_state "cursor-2|Restart Milk V2|2|1|1"
-SECOND_HEALTH="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$POS_PORT/health")"
+SECOND_HEALTH="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$POS_PORT/api/v1/health")"
 FINAL_STATE="$(state)"
 
 if ! grep -q '^phase=2 changes cursor=cursor-1$' "$REQUEST_LOG"; then
