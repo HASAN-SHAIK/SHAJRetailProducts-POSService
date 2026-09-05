@@ -1,0 +1,89 @@
+name: V1 Trailing JSON Cycle C
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Assert exact head
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          echo "EXACT_HEAD=$(git rev-parse HEAD)"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Focused runtime harness syntax
+        run: bash -n tests/v1-trailing-json-runtime.sh
+
+      - name: Focused automated trailing-JSON test
+        id: focused
+        shell: bash
+        run: |
+          set +e
+          go test ./internal/server -run '^TestLocalAuthLoginRejectsTrailingJSONDocument$' -count=1 -v
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Relevant complete Go suite
+        id: suite
+        shell: bash
+        run: |
+          set +e
+          go test ./...
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Build runnable POSService
+        run: go build -o /tmp/posservice-cycle-c ./cmd/posservice
+
+      - name: Real trailing-JSON application runtime
+        id: runtime
+        shell: bash
+        run: |
+          set +e
+          bash tests/v1-trailing-json-runtime.sh /tmp/posservice-cycle-c
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Record certification verdict
+        shell: bash
+        env:
+          FOCUSED_EXIT: ${{ steps.focused.outputs.exit_code }}
+          SUITE_EXIT: ${{ steps.suite.outputs.exit_code }}
+          RUNTIME_EXIT: ${{ steps.runtime.outputs.exit_code }}
+        run: |
+          set -euo pipefail
+          echo "TRAILING_JSON_FOCUSED_EXIT=$FOCUSED_EXIT"
+          echo "TRAILING_JSON_SUITE_EXIT=$SUITE_EXIT"
+          echo "TRAILING_JSON_RUNTIME_EXIT=$RUNTIME_EXIT"
+          if [[ "$FOCUSED_EXIT" != "0" || "$SUITE_EXIT" != "0" || "$RUNTIME_EXIT" != "0" ]]; then
+            echo "TRAILING_JSON_CERTIFICATION_PASS=false"
+            exit 1
+          fi
+          echo "TRAILING_JSON_CERTIFICATION_PASS=true"
