@@ -1,0 +1,115 @@
+name: V1 Readonly SQLite Startup Cycle C
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Assert exact head
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          echo "EXACT_HEAD=$(git rev-parse HEAD)"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Focused read-only SQLite write acceptance
+        run: go test ./internal/database -run '^TestReadOnlySQLiteRejectsDurableWrite$' -count=1 -v
+
+      - name: Complete Go suite
+        run: go test ./...
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Build runnable POSService
+        run: go build -o /tmp/posservice-cycle-c ./cmd/posservice
+
+      - name: Real process read-only SQLite restart verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          work=/tmp/shaj-cycle-c-readonly-sqlite
+          state="$work/state"
+          runtime="$work/runtime"
+          rm -rf "$work"
+          mkdir -p "$state" "$runtime/backups"
+
+          export POS_ENVIRONMENT=development
+          export POS_LISTEN_ADDRESS=127.0.0.1:4800
+          export POS_SQLITE_PATH="$state/pos.db"
+          export POS_LOCAL_API_TOKEN=cycle-c-readonly-db-token-1234567890abcdef
+          export POS_LOCAL_TOKEN_FILE="$runtime/pos.token"
+          export POS_ALLOWED_ORIGINS=http://127.0.0.1:5173
+          export POS_CENTRAL_API_URL=
+          export POS_BACKUP_DIRECTORY="$runtime/backups"
+          export POS_BACKUP_INTERVAL=6h
+          export POS_BACKUP_RETENTION=2
+          export POS_OBSERVABILITY_INTERVAL=30s
+
+          /tmp/posservice-cycle-c > "$work/first.log" 2>&1 &
+          first_pid=$!
+          ready=false
+          for i in $(seq 1 40); do
+            if curl --silent --fail --max-time 1 http://127.0.0.1:4800/api/v1/health >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$first_pid" 2>/dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+          echo "READONLY_SQLITE_WRITABLE_BOOT_READY=$ready"
+          cat "$work/first.log"
+          test "$ready" = true
+          kill "$first_pid"
+          wait "$first_pid" 2>/dev/null || true
+
+          test -f "$state/pos.db"
+          rm -f "$state/pos.db-wal" "$state/pos.db-shm"
+          before=$(sha256sum "$state/pos.db" | awk '{print $1}')
+          chmod 0444 "$state/pos.db"
+          chmod 0555 "$state"
+
+          set +e
+          timeout 8s /tmp/posservice-cycle-c > "$work/readonly.log" 2>&1
+          rc=$?
+          set -e
+
+          after=$(sha256sum "$state/pos.db" | awk '{print $1}')
+          echo "READONLY_SQLITE_SECOND_EXIT_CODE=$rc"
+          echo "READONLY_SQLITE_BYTES_PRESERVED=$([ "$before" = "$after" ] && echo true || echo false)"
+          cat "$work/readonly.log"
+
+          reachable=false
+          if curl --silent --fail --max-time 1 http://127.0.0.1:4800/api/v1/health >/dev/null 2>&1; then
+            reachable=true
+          fi
+          echo "READONLY_SQLITE_HEALTH_REACHABLE=$reachable"
+
+          test "$before" = "$after"
+          test "$rc" -ne 0
+          test "$rc" -ne 124
+          test "$reachable" = false
+          grep -Eq 'open local database|apply local database migrations|database|readonly|read-only|attempt to write' "$work/readonly.log"
+          echo 'READONLY_SQLITE_STARTUP_FAIL_CLOSED=true'
