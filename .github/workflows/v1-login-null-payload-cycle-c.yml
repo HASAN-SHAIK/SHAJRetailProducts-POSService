@@ -32,18 +32,33 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Prepare evidence directory
+        run: mkdir -p /tmp/cycle-c-evidence
+
       - name: Runtime harness syntax
         run: bash -n tests/v1-login-null-payload-runtime.sh
 
       - name: Focused null-payload login regression
         id: focused
         continue-on-error: true
-        run: go test ./internal/server -run '^TestLocalAuthLoginRejectsNullJSONPayload$' -count=1 -v
+        shell: bash
+        run: |
+          set +e
+          go test ./internal/server -run '^TestLocalAuthLoginRejectsNullJSONPayload$' -count=1 -v 2>&1 | tee /tmp/cycle-c-evidence/focused.txt
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > /tmp/cycle-c-evidence/focused.exit
+          exit "$rc"
 
       - name: Relevant complete Go suite
         id: suite
         continue-on-error: true
-        run: go test ./...
+        shell: bash
+        run: |
+          set +e
+          go test ./... 2>&1 | tee /tmp/cycle-c-evidence/suite.txt
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > /tmp/cycle-c-evidence/suite.exit
+          exit "$rc"
 
       - name: Go vet
         run: go vet ./...
@@ -54,14 +69,37 @@ jobs:
       - name: Real null-payload login application runtime
         id: runtime
         continue-on-error: true
-        run: bash tests/v1-login-null-payload-runtime.sh /tmp/posservice-cycle-c
-
-      - name: Record certification result
         shell: bash
         run: |
-          echo "FOCUSED_OUTCOME=${{ steps.focused.outcome }}"
-          echo "SUITE_OUTCOME=${{ steps.suite.outcome }}"
-          echo "RUNTIME_OUTCOME=${{ steps.runtime.outcome }}"
+          set +e
+          bash tests/v1-login-null-payload-runtime.sh /tmp/posservice-cycle-c 2>&1 | tee /tmp/cycle-c-evidence/runtime.txt
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > /tmp/cycle-c-evidence/runtime.exit
+          exit "$rc"
+
+      - name: Record exact outcomes
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "EXACT_HEAD=$(git rev-parse HEAD)"
+            echo "FOCUSED_OUTCOME=${{ steps.focused.outcome }}"
+            echo "SUITE_OUTCOME=${{ steps.suite.outcome }}"
+            echo "RUNTIME_OUTCOME=${{ steps.runtime.outcome }}"
+          } | tee /tmp/cycle-c-evidence/outcomes.txt
+
+      - name: Upload certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cycle-c-null-login-evidence
+          path: /tmp/cycle-c-evidence
+          if-no-files-found: error
+
+      - name: Record certification result
+        if: always()
+        shell: bash
+        run: |
           if [[ "${{ steps.focused.outcome }}" != success || "${{ steps.suite.outcome }}" != success || "${{ steps.runtime.outcome }}" != success ]]; then
             echo 'NULL_LOGIN_CERTIFICATION=FAIL'
             exit 1
