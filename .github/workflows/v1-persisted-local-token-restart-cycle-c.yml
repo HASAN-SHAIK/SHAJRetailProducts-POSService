@@ -1,0 +1,96 @@
+name: V1 Persisted Local Token Restart Cycle C
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'internal/security/local_token_restart_v1_test.go'
+      - 'scripts/v1-persisted-local-token-restart-runtime.sh'
+      - '.github/workflows/v1-persisted-local-token-restart-cycle-c.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact head
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          echo "EXACT_HEAD=$(git rev-parse HEAD)"
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Prepare evidence directory
+        run: mkdir -p /tmp/cycle-c-evidence
+      - name: Runtime harness syntax
+        run: bash -n scripts/v1-persisted-local-token-restart-runtime.sh
+      - name: Focused persisted-token reload regression
+        id: focused
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          go test ./internal/security -run '^TestV1LoadOrCreateReloadsValidPersistedLocalToken$' -count=1 -v 2>&1 | tee /tmp/cycle-c-evidence/focused.txt
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > /tmp/cycle-c-evidence/focused.exit
+          exit "$rc"
+      - name: Relevant complete Go suite
+        id: suite
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          go test ./... 2>&1 | tee /tmp/cycle-c-evidence/suite.txt
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > /tmp/cycle-c-evidence/suite.exit
+          exit "$rc"
+      - name: Go vet
+        run: go vet ./...
+      - name: Build runnable POSService
+        run: go build -o /tmp/posservice-cycle-c ./cmd/posservice
+      - name: Real persisted-token restart application runtime
+        id: runtime
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          bash scripts/v1-persisted-local-token-restart-runtime.sh /tmp/posservice-cycle-c 2>&1 | tee /tmp/cycle-c-evidence/runtime.txt
+          rc=${PIPESTATUS[0]}
+          echo "$rc" > /tmp/cycle-c-evidence/runtime.exit
+          exit "$rc"
+      - name: Record exact outcomes
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "EXACT_HEAD=$(git rev-parse HEAD)"
+            echo "FOCUSED_OUTCOME=${{ steps.focused.outcome }}"
+            echo "SUITE_OUTCOME=${{ steps.suite.outcome }}"
+            echo "RUNTIME_OUTCOME=${{ steps.runtime.outcome }}"
+          } | tee /tmp/cycle-c-evidence/outcomes.txt
+      - name: Upload certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cycle-c-persisted-local-token-restart-evidence
+          path: /tmp/cycle-c-evidence
+          if-no-files-found: error
+      - name: Record certification result
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.focused.outcome }}" != success || "${{ steps.suite.outcome }}" != success || "${{ steps.runtime.outcome }}" != success ]]; then
+            echo 'PERSISTED_LOCAL_TOKEN_RESTART_CERTIFICATION=FAIL'
+            exit 1
+          fi
+          echo 'PERSISTED_LOCAL_TOKEN_RESTART_CERTIFICATION=PASS'
