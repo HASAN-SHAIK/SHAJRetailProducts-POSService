@@ -38,30 +38,35 @@ for _ in $(seq 1 30); do
   sleep 0.5
 done
 
+login_status=000
+login_body=''
+if [[ "$listener" == true ]]; then
+  login_status=$(curl --silent --show-error --max-time 5 --output "$work/login.json" --write-out '%{http_code}' \
+    -H 'Content-Type: application/json' \
+    -H "X-POS-Local-Token: $token" \
+    --data-binary '{"user_id":"missing-cycle-c-symlink","pin":"2468"}' \
+    http://127.0.0.1:4822/api/v1/auth/login || true)
+  login_body=$(cat "$work/login.json" 2>/dev/null || true)
+fi
+
 process_alive=false
 if kill -0 "$pid" 2>/dev/null; then process_alive=true; fi
-
-if [[ "$process_alive" == true ]]; then
-  kill "$pid" 2>/dev/null || true
-fi
+if [[ "$process_alive" == true ]]; then kill "$pid" 2>/dev/null || true; fi
 set +e
 wait "$pid" 2>/dev/null
 exit_code=$?
 set -e
 
 target_after=$(sha256sum "$target" | awk '{print $1}')
-symlink_preserved=false
-if [[ -L "$token_file" ]]; then symlink_preserved=true; fi
-target_unchanged=false
-if [[ "$target_before" == "$target_after" ]]; then target_unchanged=true; fi
-secret_leaked=false
-if grep -Fq "$token" "$work/pos.log"; then secret_leaked=true; fi
-safe_error=false
-if grep -Eqi 'local API security|local token|symlink|symbolic link' "$work/pos.log"; then safe_error=true; fi
-sqlite_present=false
-if [[ -e "$work/state/pos.db" ]]; then sqlite_present=true; fi
+symlink_preserved=false; if [[ -L "$token_file" ]]; then symlink_preserved=true; fi
+target_unchanged=false; if [[ "$target_before" == "$target_after" ]]; then target_unchanged=true; fi
+secret_leaked=false; if grep -Fq "$token" "$work/pos.log"; then secret_leaked=true; fi
+safe_error=false; if grep -Eqi 'local API security|local token|symlink|symbolic link' "$work/pos.log"; then safe_error=true; fi
+sqlite_present=false; if [[ -e "$work/state/pos.db" ]]; then sqlite_present=true; fi
 
 echo "LOCAL_TOKEN_SYMLINK_LISTENER_REACHABLE=$listener"
+echo "LOCAL_TOKEN_SYMLINK_LOGIN_STATUS=$login_status"
+echo "LOCAL_TOKEN_SYMLINK_LOGIN_BODY=$login_body"
 echo "LOCAL_TOKEN_SYMLINK_PROCESS_ALIVE_BEFORE_STOP=$process_alive"
 echo "LOCAL_TOKEN_SYMLINK_EXIT_CODE=$exit_code"
 echo "LOCAL_TOKEN_SYMLINK_TARGET_UNCHANGED=$target_unchanged"
