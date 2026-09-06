@@ -1,0 +1,78 @@
+name: V1 Local Token Symlink Cycle C
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Assert exact head
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          echo "EXACT_HEAD=$(git rev-parse HEAD)"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Runtime harness syntax
+        run: bash -n tests/v1-local-token-symlink-runtime.sh
+
+      - name: Focused symlink security regression
+        id: focused
+        continue-on-error: true
+        run: go test ./internal/security -run '^TestV1LoadOrCreateRejectsSymlinkedLocalTokenFile$' -count=1 -v
+
+      - name: Relevant complete Go suite
+        id: suite
+        continue-on-error: true
+        run: go test ./...
+
+      - name: Go vet
+        id: vet
+        continue-on-error: true
+        run: go vet ./...
+
+      - name: Build runnable POSService
+        id: build
+        continue-on-error: true
+        run: go build -o /tmp/posservice-cycle-c ./cmd/posservice
+
+      - name: Real symlinked-token application runtime
+        id: runtime
+        if: always() && steps.build.outcome == 'success'
+        continue-on-error: true
+        run: bash tests/v1-local-token-symlink-runtime.sh /tmp/posservice-cycle-c
+
+      - name: Record outcomes and fail closed
+        if: always()
+        shell: bash
+        run: |
+          echo "FOCUSED_OUTCOME=${{ steps.focused.outcome }}"
+          echo "SUITE_OUTCOME=${{ steps.suite.outcome }}"
+          echo "VET_OUTCOME=${{ steps.vet.outcome }}"
+          echo "BUILD_OUTCOME=${{ steps.build.outcome }}"
+          echo "RUNTIME_OUTCOME=${{ steps.runtime.outcome }}"
+          test "${{ steps.focused.outcome }}" = success
+          test "${{ steps.suite.outcome }}" = success
+          test "${{ steps.vet.outcome }}" = success
+          test "${{ steps.build.outcome }}" = success
+          test "${{ steps.runtime.outcome }}" = success
+          echo 'LOCAL_TOKEN_SYMLINK_CERTIFICATION=PASS'
