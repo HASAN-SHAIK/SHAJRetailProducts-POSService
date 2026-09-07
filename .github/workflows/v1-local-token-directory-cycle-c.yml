@@ -1,0 +1,116 @@
+name: V1 Local Token Directory Cycle C
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Assert exact head
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          echo "EXACT_HEAD=$(git rev-parse HEAD)"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Runtime harness syntax
+        run: bash -n tests/v1-local-token-directory-runtime.sh
+
+      - name: Focused directory token regression
+        id: focused
+        shell: bash
+        run: |
+          set +e
+          go test ./internal/security -run '^TestV1LoadOrCreateRejectsDirectoryTokenPath$' -count=1 -v -timeout=10s 2>&1 | tee /tmp/focused.log
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Relevant complete Go suite
+        id: suite
+        shell: bash
+        run: |
+          set +e
+          go test ./... -timeout=5m 2>&1 | tee /tmp/suite.log
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Go vet
+        id: vet
+        shell: bash
+        run: |
+          set +e
+          go vet ./... 2>&1 | tee /tmp/vet.log
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Build runnable POSService
+        id: build
+        shell: bash
+        run: |
+          set +e
+          go build -o /tmp/posservice-cycle-c ./cmd/posservice 2>&1 | tee /tmp/build.log
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Real directory token application runtime
+        id: runtime
+        if: always() && steps.build.outputs.rc == '0'
+        shell: bash
+        run: |
+          set +e
+          bash tests/v1-local-token-directory-runtime.sh /tmp/posservice-cycle-c 2>&1 | tee /tmp/runtime.log
+          rc=${PIPESTATUS[0]}
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cycle-c-local-token-directory-evidence
+          path: |
+            /tmp/focused.log
+            /tmp/suite.log
+            /tmp/vet.log
+            /tmp/build.log
+            /tmp/runtime.log
+          if-no-files-found: warn
+
+      - name: Record outcomes and fail closed
+        if: always()
+        shell: bash
+        run: |
+          echo "FOCUSED_RC=${{ steps.focused.outputs.rc }}"
+          echo "SUITE_RC=${{ steps.suite.outputs.rc }}"
+          echo "VET_RC=${{ steps.vet.outputs.rc }}"
+          echo "BUILD_RC=${{ steps.build.outputs.rc }}"
+          echo "RUNTIME_RC=${{ steps.runtime.outputs.rc }}"
+          test "${{ steps.focused.outputs.rc }}" = 0
+          test "${{ steps.suite.outputs.rc }}" = 0
+          test "${{ steps.vet.outputs.rc }}" = 0
+          test "${{ steps.build.outputs.rc }}" = 0
+          test "${{ steps.runtime.outputs.rc }}" = 0
+          echo 'LOCAL_TOKEN_DIRECTORY_CERTIFICATION=PASS'
