@@ -1,0 +1,40 @@
+name: V1 Production Offline Key Cycle C
+
+on:
+  pull_request:
+    paths:
+      - 'cmd/posservice/startup_production_offline_key_cycle_c_test.go'
+      - '.github/workflows/v1-production-offline-key-cycle-c.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Assert exact head
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          echo "EXACT_HEAD=$(git rev-parse HEAD)"
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Focused real-process startup regression
+        run: go test ./cmd/posservice -run '^TestCycleCProductionMissingOfflineGrantPublicKeyPreventsPOSServiceStartup$' -count=1 -v
+      - name: Complete Go suite
+        run: go test ./... -timeout=5m
+      - name: Go vet
+        run: go vet ./...
+      - name: Build runnable POSService
+        run: go build -o /tmp/posservice-cycle-c ./cmd/posservice
+      - name: Record certification marker
+        run: echo 'PRODUCTION_OFFLINE_KEY_CERTIFICATION=PASS'
