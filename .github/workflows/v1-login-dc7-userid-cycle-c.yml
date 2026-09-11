@@ -1,0 +1,82 @@
+name: V1 Login DC7 UserID Cycle C
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert exact head
+        if: github.event_name == 'pull_request'
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}" && echo "EXACT_HEAD=$(git rev-parse HEAD)"
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Prepare evidence
+        run: mkdir -p /tmp/cycle-c-evidence
+      - name: Runtime harness syntax
+        run: bash -n tests/v1-login-dc7-userid-runtime.sh
+      - name: Focused DC7 user_id login regression
+        id: focused
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          go test ./internal/server -run '^TestLocalAuthLoginRejectsDC7UserIDMember$' -count=1 -v 2>&1 | tee /tmp/cycle-c-evidence/focused.txt
+          rc=${PIPESTATUS[0]}; echo "$rc" > /tmp/cycle-c-evidence/focused.exit; exit "$rc"
+      - name: Relevant complete Go suite
+        id: suite
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          go test ./... 2>&1 | tee /tmp/cycle-c-evidence/suite.txt
+          rc=${PIPESTATUS[0]}; echo "$rc" > /tmp/cycle-c-evidence/suite.exit; exit "$rc"
+      - name: Go vet
+        run: go vet ./...
+      - name: Build runnable POSService
+        run: go build -o /tmp/posservice-cycle-c ./cmd/posservice
+      - name: Real DC7 user_id login application runtime
+        id: runtime
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          bash tests/v1-login-dc7-userid-runtime.sh /tmp/posservice-cycle-c 2>&1 | tee /tmp/cycle-c-evidence/runtime.txt
+          rc=${PIPESTATUS[0]}; echo "$rc" > /tmp/cycle-c-evidence/runtime.exit; exit "$rc"
+      - name: Record exact outcomes
+        if: always()
+        run: |
+          { echo "EXACT_HEAD=$(git rev-parse HEAD)"; echo "FOCUSED_RC=$(cat /tmp/cycle-c-evidence/focused.exit 2>/dev/null || echo missing)"; echo "SUITE_RC=$(cat /tmp/cycle-c-evidence/suite.exit 2>/dev/null || echo missing)"; echo "RUNTIME_RC=$(cat /tmp/cycle-c-evidence/runtime.exit 2>/dev/null || echo missing)"; } | tee /tmp/cycle-c-evidence/outcomes.txt
+      - name: Upload certification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cycle-c-dc7-userid-login-evidence
+          path: /tmp/cycle-c-evidence
+          if-no-files-found: error
+      - name: Record certification result
+        if: always()
+        shell: bash
+        run: |
+          focused_rc=$(cat /tmp/cycle-c-evidence/focused.exit 2>/dev/null || echo missing)
+          suite_rc=$(cat /tmp/cycle-c-evidence/suite.exit 2>/dev/null || echo missing)
+          runtime_rc=$(cat /tmp/cycle-c-evidence/runtime.exit 2>/dev/null || echo missing)
+          if [[ "$focused_rc" != 0 || "$suite_rc" != 0 || "$runtime_rc" != 0 ]]; then
+            echo "DC7_USERID_LOGIN_CERTIFICATION=FAIL focused=$focused_rc suite=$suite_rc runtime=$runtime_rc"
+            exit 1
+          fi
+          echo 'DC7_USERID_LOGIN_CERTIFICATION=PASS'
