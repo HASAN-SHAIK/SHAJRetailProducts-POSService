@@ -25,6 +25,8 @@ func TestLocalAuthLoginRejectsDC2PINMember(t *testing.T) {
 
 	s := &Server{localAuth: localauth.New(db, "")}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"user_id":"missing-cycle-c","pin":"\u0012"}`))
+	req.Body = http.NoBody
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader("{\"user_id\":\"missing-cycle-c\",\"pin\":\"\\u0012\"}"))
 	rec := httptest.NewRecorder()
 
 	s.handleLocalAuthLogin(rec, req)
