@@ -97,9 +97,16 @@ func (r *Repository) GetByBarcode(ctx context.Context, barcode, storeID string) 
 }
 
 func (r *Repository) Search(ctx context.Context, query, storeID string, limit int) ([]Product, error) {
+	return r.SearchWithOffset(ctx, query, storeID, limit, 0)
+}
+
+func (r *Repository) SearchWithOffset(ctx context.Context, query, storeID string, limit, offset int) ([]Product, error) {
 	query = strings.TrimSpace(query)
 	if limit <= 0 || limit > 200 {
 		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	like := "%" + query + "%"
 	rows, err := r.db.SQL().QueryContext(ctx, `
@@ -110,7 +117,7 @@ func (r *Repository) Search(ctx context.Context, query, storeID string, limit in
         WHERE p.is_active = 1
           AND (? = '' OR p.name LIKE ? COLLATE NOCASE OR p.sku LIKE ? COLLATE NOCASE OR b.barcode LIKE ?)
         ORDER BY p.name
-        LIMIT ?`, query, like, like, like, limit)
+        LIMIT ? OFFSET ?`, query, like, like, like, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("search catalog: %w", err)
 	}

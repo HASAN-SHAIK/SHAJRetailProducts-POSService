@@ -2,7 +2,9 @@ package orders
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -209,7 +211,10 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 		}
 	}
 
-	orderID := newID("ord")
+	orderID, err := newID("ord")
+	if err != nil {
+		return Order{}, fmt.Errorf("generate order id: %w", err)
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	var built []Item
 	var subtotal, discount, tax, total int64
@@ -313,8 +318,12 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 		if barcode == nil && len(product.Barcodes) > 0 {
 			barcode = &product.Barcodes[0]
 		}
+		itemID, err := newID("itm")
+		if err != nil {
+			return Order{}, fmt.Errorf("generate order item id: %w", err)
+		}
 		built = append(built, Item{
-			ID: newID("itm"), LineNo: i + 1, ProductID: product.ID, SKU: product.SKU, ProductName: product.Name,
+			ID: itemID, LineNo: i + 1, ProductID: product.ID, SKU: product.SKU, ProductName: product.Name,
 			Barcode: barcode, CategoryIDSnapshot: categoryIDSnapshot, CategoryNameSnapshot: categoryNameSnapshot,
 			QuantityMilli: in.QuantityMilli, UnitPriceMinor: price, DiscountMinor: in.DiscountMinor,
 			TaxableMinor: &taxable, GSTRateBps: product.GSTRateBps, TaxMinor: lineTax, LineTotalMinor: lineTotal, TaxCode: product.TaxCode,
@@ -332,7 +341,7 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Order, error) 
 		CreatedAt: now, UpdatedAt: now, Items: built,
 	}
 
-	err := s.db.WithTx(ctx, func(tx *sql.Tx) error {
+	err = s.db.WithTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `
             INSERT INTO sales_orders(id,client_order_id,store_id,terminal_id,customer_id,created_by_user_id,status,currency,subtotal_minor,discount_minor,tax_minor,total_minor,notes,source,version,created_at,updated_at)
             VALUES(?,?,?,?,?,?,'confirmed',?,?,?,?,?,?,'pos',1,?,?)`,
@@ -478,6 +487,10 @@ func (s *Service) saveSnapshot(ctx context.Context, tx *sql.Tx, order Order) err
 	return err
 }
 
-func newID(prefix string) string {
-	return fmt.Sprintf("%s_%d", prefix, time.Now().UTC().UnixNano())
+func newID(prefix string) (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return prefix + "_" + hex.EncodeToString(raw[:]), nil
 }
