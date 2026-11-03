@@ -165,7 +165,7 @@ func (s *Server) handleDeviceHeartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCatalogSearch(w http.ResponseWriter, r *http.Request) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit")); products, err := s.catalog.Search(r.Context(), r.URL.Query().Get("q"), s.currentStoreID(r.Context()), limit)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit")); offset, _ := strconv.Atoi(r.URL.Query().Get("offset")); products, err := s.catalog.SearchWithOffset(r.Context(), r.URL.Query().Get("q"), s.currentStoreID(r.Context()), limit, offset)
 	if err != nil { writeError(w, http.StatusInternalServerError, "catalog_search_failed"); return }
 	writeJSON(w, http.StatusOK, map[string]any{"items": products, "count": len(products)})
 }

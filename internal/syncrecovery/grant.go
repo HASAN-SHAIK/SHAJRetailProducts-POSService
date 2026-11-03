@@ -50,17 +50,34 @@ func Verify(token, publicKeyPEM string) (Grant, error) {
     var header map[string]any
     if json.Unmarshal(headerBytes, &header) != nil || header["alg"] != "RS256" { return Grant{}, ErrInvalidGrant }
 
-    block, _ := pem.Decode([]byte(strings.TrimSpace(publicKeyPEM)))
-    if block == nil { return Grant{}, ErrInvalidGrant }
-    parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
-    if err != nil { return Grant{}, ErrInvalidGrant }
-    key, ok := parsed.(*rsa.PublicKey)
-    if !ok { return Grant{}, ErrInvalidGrant }
-
     signature, err := base64.RawURLEncoding.DecodeString(parts[2])
     if err != nil { return Grant{}, ErrInvalidGrant }
     digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
-    if rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature) != nil { return Grant{}, ErrInvalidGrant }
+
+    rest := []byte(strings.TrimSpace(publicKeyPEM))
+    verified := false
+    for {
+        var block *pem.Block
+        block, rest = pem.Decode(rest)
+        if block == nil {
+            break
+        }
+        var key *rsa.PublicKey
+        if parsed, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
+            if k, ok := parsed.(*rsa.PublicKey); ok {
+                key = k
+            }
+        } else if k, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil {
+            key = k
+        }
+        if key != nil && rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature) == nil {
+            verified = true
+            break
+        }
+    }
+    if !verified {
+        return Grant{}, ErrInvalidGrant
+    }
 
     payload, err := base64.RawURLEncoding.DecodeString(parts[1])
     if err != nil { return Grant{}, ErrInvalidGrant }

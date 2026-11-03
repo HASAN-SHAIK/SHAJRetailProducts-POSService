@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -65,7 +66,7 @@ func TestV1VerifiedSnapshotRestoresDurableSyncFacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat snapshot: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("snapshot permissions = %o, want 600", info.Mode().Perm())
 	}
 

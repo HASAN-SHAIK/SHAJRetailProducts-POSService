@@ -62,3 +62,20 @@ func TestRejectsForgedExpiredOrMismatchedRecoveryGrant(t *testing.T) {
     mismatched := validRecoveryClaims(); mismatched["ordering_key"] = "sales_order:other"
     if _, err := Verify(signRecoveryGrant(t, trusted, mismatched), publicPEM); err != ErrInvalidGrant { t.Fatalf("mismatched ordering key error=%v", err) }
 }
+
+
+func TestVerifyMultiKeyRotationRecoveryGrant(t *testing.T) {
+    oldPriv, oldPubPEM := testRecoveryKeys(t)
+    newPriv, newPubPEM := testRecoveryKeys(t)
+    multiKeyPEM := newPubPEM + "\n" + oldPubPEM
+
+    // Old key grant verifies against multi-key bundle
+    grant1, err := Verify(signRecoveryGrant(t, oldPriv, validRecoveryClaims()), multiKeyPEM)
+    if err != nil { t.Fatalf("failed old key verify in multi-key: %v", err) }
+    if grant1.RecoveryID != "recovery-1" { t.Fatalf("unexpected grant1: %+v", grant1) }
+
+    // New key grant verifies against multi-key bundle
+    grant2, err := Verify(signRecoveryGrant(t, newPriv, validRecoveryClaims()), multiKeyPEM)
+    if err != nil { t.Fatalf("failed new key verify in multi-key: %v", err) }
+    if grant2.RecoveryID != "recovery-1" { t.Fatalf("unexpected grant2: %+v", grant2) }
+}

@@ -222,24 +222,33 @@ func (s *Service) verifyGrant(token string) (grantClaims, error) {
     var header map[string]any
     if json.Unmarshal(headerBytes, &header) != nil || header["alg"] != "RS256" { return grantClaims{}, ErrInvalidGrant }
 
-    block, _ := pem.Decode(s.grantPublicKey)
-    if block == nil { return grantClaims{}, ErrInvalidGrant }
-    var publicKey *rsa.PublicKey
-    if parsed, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
-        key, ok := parsed.(*rsa.PublicKey)
-        if !ok { return grantClaims{}, ErrInvalidGrant }
-        publicKey = key
-    } else if key, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil {
-        publicKey = key
-    } else {
-        return grantClaims{}, ErrInvalidGrant
-    }
-
     signature, err := base64.RawURLEncoding.DecodeString(parts[2])
     if err != nil { return grantClaims{}, ErrInvalidGrant }
     signingInput := parts[0] + "." + parts[1]
     digest := sha256.Sum256([]byte(signingInput))
-    if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, digest[:], signature); err != nil {
+
+    rest := s.grantPublicKey
+    verified := false
+    for {
+        var block *pem.Block
+        block, rest = pem.Decode(rest)
+        if block == nil {
+            break
+        }
+        var publicKey *rsa.PublicKey
+        if parsed, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
+            if key, ok := parsed.(*rsa.PublicKey); ok {
+                publicKey = key
+            }
+        } else if key, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil {
+            publicKey = key
+        }
+        if publicKey != nil && rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, digest[:], signature) == nil {
+            verified = true
+            break
+        }
+    }
+    if !verified {
         return grantClaims{}, ErrInvalidGrant
     }
 

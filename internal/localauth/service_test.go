@@ -101,3 +101,70 @@ func signTestGrant(t *testing.T, privateKey *rsa.PrivateKey, claims map[string]a
 	if err != nil { t.Fatal(err) }
 	return input + "." + base64.RawURLEncoding.EncodeToString(signature)
 }
+
+
+func TestMultiKeyRotationAndValidation(t *testing.T) {
+	ctx := context.Background()
+	db, err := database.Open(ctx, filepath.Join(t.TempDir(), "pos.db"))
+	if err != nil { t.Fatal(err) }
+	defer db.Close()
+	if err := db.Migrate(ctx); err != nil { t.Fatalf("migrate: %v", err) }
+
+	oldPriv, oldPubPEM := testKeys(t)
+	newPriv, newPubPEM := testKeys(t)
+	attackerPriv, _ := testKeys(t)
+
+	// Configure service with both old and new public keys (rotation window)
+	multiKeyPEM := newPubPEM + "\n" + oldPubPEM
+	service := New(db, multiKeyPEM)
+
+	// 1. Grant signed by old key is accepted during rotation
+	oldGrant := signTestGrant(t, oldPriv, map[string]any{
+		"type": "pos_offline_grant", "user_id": "user-old", "tenant_id": "tenant-1", "role": "staff",
+		"device_id": "device-1", "branch_id": "store-1", "all_branch_access": false,
+		"permissions": []string{"orders:read"}, "grant_id": "grant-old",
+		"iss": "shajtech-central", "aud": "shajtech-pos-edge", "exp": time.Now().Add(time.Hour).Unix(),
+	})
+	userOld, err := service.EnrollForDevice(ctx, oldGrant, "1234", "device-1", "store-1")
+	if err != nil { t.Fatalf("failed to enroll grant signed with old key: %v", err) }
+	if userOld.UserID != "user-old" { t.Fatalf("unexpected user: %+v", userOld) }
+
+	// 2. Grant signed by new key is accepted
+	newGrant := signTestGrant(t, newPriv, map[string]any{
+		"type": "pos_offline_grant", "user_id": "user-new", "tenant_id": "tenant-1", "role": "manager",
+		"device_id": "device-1", "branch_id": "store-1", "all_branch_access": false,
+		"permissions": []string{"orders:read", "orders:write"}, "grant_id": "grant-new",
+		"iss": "shajtech-central", "aud": "shajtech-pos-edge", "exp": time.Now().Add(time.Hour).Unix(),
+	})
+	userNew, err := service.EnrollForDevice(ctx, newGrant, "5678", "device-1", "store-1")
+	if err != nil { t.Fatalf("failed to enroll grant signed with new key: %v", err) }
+	if userNew.UserID != "user-new" { t.Fatalf("unexpected user: %+v", userNew) }
+
+	// 3. Expired grant is rejected
+	expiredGrant := signTestGrant(t, newPriv, map[string]any{
+		"type": "pos_offline_grant", "user_id": "user-exp", "tenant_id": "tenant-1", "role": "staff",
+		"device_id": "device-1", "branch_id": "store-1", "all_branch_access": false,
+		"permissions": []string{"orders:read"}, "grant_id": "grant-exp",
+		"iss": "shajtech-central", "aud": "shajtech-pos-edge", "exp": time.Now().Add(-10 * time.Minute).Unix(),
+	})
+	if _, err := service.EnrollForDevice(ctx, expiredGrant, "1234", "device-1", "store-1"); err != ErrInvalidGrant {
+		t.Fatalf("expected ErrInvalidGrant for expired grant, got: %v", err)
+	}
+
+	// 4. Forged grant is rejected
+	forgedGrant := signTestGrant(t, attackerPriv, map[string]any{
+		"type": "pos_offline_grant", "user_id": "attacker", "tenant_id": "tenant-1", "role": "staff",
+		"device_id": "device-1", "branch_id": "store-1", "all_branch_access": false,
+		"permissions": []string{"orders:read"}, "grant_id": "grant-forged",
+		"iss": "shajtech-central", "aud": "shajtech-pos-edge", "exp": time.Now().Add(time.Hour).Unix(),
+	})
+	if _, err := service.EnrollForDevice(ctx, forgedGrant, "1234", "device-1", "store-1"); err != ErrInvalidGrant {
+		t.Fatalf("expected ErrInvalidGrant for forged grant, got: %v", err)
+	}
+
+	// 5. Corrupted grant is rejected
+	corruptedGrant := newGrant + "tampered"
+	if _, err := service.EnrollForDevice(ctx, corruptedGrant, "1234", "device-1", "store-1"); err != ErrInvalidGrant {
+		t.Fatalf("expected ErrInvalidGrant for corrupted grant, got: %v", err)
+	}
+}
